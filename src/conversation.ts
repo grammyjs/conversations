@@ -18,14 +18,14 @@ function ident<T>(arg: T) {
 
 class InterruptPromise extends Promise<void> {
     waiting = true;
-    resolve = () => {/* dead code */};
+    resolve: () => void;
     constructor() {
-        super((resolve) =>
-            this.resolve = () => {
-                this.waiting = false;
-                resolve();
-            }
-        );
+        let res: () => void;
+        super((r) => res = r);
+        this.resolve = () => {
+            this.waiting = false;
+            res();
+        };
     }
 }
 
