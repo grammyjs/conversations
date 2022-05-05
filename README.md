@@ -7,11 +7,19 @@
 Here is an example of how you can use this package. It mainly exports `Conversation` and `ConversationFlavor`.
 
 ```ts
+import { Bot, Context, session } from "grammy";
+import {
+    type Conversation,
+    type ConversationFlavor,
+    createConversation,
+} from "@grammyjs/conversations";
+
 type MyContext = ConversationFlavor<Context>;
+type MyConversation = Conversation<MyContext>;
 
 const bot = new Bot<MyContext>("");
 
-async function conversation(t: Conversation<Context>, ctx: MyContext) {
+async function conversation(t: MyConversation, ctx: MyContext) {
     await captcha(t, ctx);
     await ctx.reply("Send a text message!");
     ctx = await t.wait();
@@ -29,7 +37,7 @@ async function conversation(t: Conversation<Context>, ctx: MyContext) {
     await ctx.reply("Thanks for participating!");
 }
 
-async function captcha(t: Conversation<Context>, ctx: MyContext) {
+async function captcha(t: MyConversation, ctx: MyContext) {
     await ctx.reply("Prove you are human! What is the answer to everything?");
     ctx = await t.wait();
     while (ctx.message?.text !== "42") {
