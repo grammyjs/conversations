@@ -1,4 +1,4 @@
-# <h1 align="center">grammY Conversation</h1>
+# <h1 align="center">grammY Conversations</h1>
 
 ---
 
