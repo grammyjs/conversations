@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "charset": "utf8",
+        "forceConsistentCasingInFileNames": true,
+        "newLine": "lf",
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitReturns": true,
+        "noUnusedParameters": true,
+        "rootDir": "./src/",
+        "strict": true,
+        "declaration": true,
+        "moduleResolution": "node",
+        "module": "commonjs",
+        "outDir": "./out/",
+        "skipLibCheck": true,
+        "target": "es2019"
+    },
+    "include": ["src/"],
+    "deno2node": {
+        "vendorDir": "src/vendor"
+    }
+}
