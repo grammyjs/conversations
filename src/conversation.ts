@@ -88,7 +88,7 @@ export function createConversation<C extends Context>(
         // Define how to run a conversation
         async function run(log: OpLog, target = builder) {
             const onWait = new InterruptPromise();
-            const conversation = new Conversation<C>(
+            const conversation = new ConversationImpl<C>(
                 log,
                 ctx.api,
                 ctx.me,
@@ -130,7 +130,8 @@ export function createConversation<C extends Context>(
     };
 }
 
-class Conversation<C extends Context> {
+export type Conversation<C extends Context> = ConversationImpl<C>;
+class ConversationImpl<C extends Context> {
     private op = 0;
 
     constructor(
