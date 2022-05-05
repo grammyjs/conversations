@@ -16,17 +16,19 @@ function ident<T>(arg: T) {
     return arg;
 }
 
-class InterruptPromise extends Promise<void> {
-    waiting = true;
-    resolve: () => void;
-    constructor() {
-        let res: () => void;
-        super((r) => res = r);
-        this.resolve = () => {
-            this.waiting = false;
-            res();
-        };
-    }
+interface Interruptor {
+    promise: Promise<void>;
+    waiting: boolean;
+    done: () => void;
+}
+function interruptor(): Interruptor {
+    const int: Interruptor = {
+        waiting: true,
+        done: () => {},
+        promise: Promise.resolve(),
+    };
+    int.promise = new Promise((r) => int.done = r);
+    return int;
 }
 
 type ConversationBuilder<C extends Context> = (
@@ -87,14 +89,14 @@ export function createConversation<C extends Context>(
 
         // Define how to run a conversation
         async function run(log: OpLog, target = builder) {
-            const onWait = new InterruptPromise();
+            const onWait = interruptor();
             const conversation = new ConversationImpl<C>(
                 log,
                 ctx.api,
                 ctx.me,
                 onWait,
             );
-            await Promise.race([onWait, target(conversation, ctx)]);
+            await Promise.race([onWait.promise, target(conversation, ctx)]);
             if (!onWait.waiting && ctx.session?.conversation !== undefined) {
                 ctx.session.conversation = undefined;
             }
@@ -138,7 +140,7 @@ class ConversationImpl<C extends Context> {
         private readonly opLog: OpLog,
         private api: Api,
         private me: UserFromGetMe,
-        private onWait: InterruptPromise,
+        private onWait: Interruptor,
     ) {
         api.config.use(async (prev, method, payload, signal) => {
             if (this.replaying) return this.replayOp("api");
@@ -183,7 +185,7 @@ class ConversationImpl<C extends Context> {
 
     async wait(): Promise<C> {
         if (this.replaying) return this.replayOp("wait");
-        this.onWait.resolve();
+        this.onWait.done();
         await new Promise(() => {}); // intercept function execution
         // deno-lint-ignore no-explicit-any
         return 0 as any; // dead code
