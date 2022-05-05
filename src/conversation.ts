@@ -33,7 +33,7 @@ type ConversationBuilder<C extends Context> = (
     t: Conversation<C>,
     ctx: C,
 ) => unknown | Promise<unknown>;
-type ConversationFlavor<C extends Context> =
+export type ConversationFlavor<C extends Context> =
     & C
     & { conversation: ConversationControls<C> }
     & SessionFlavor<ConversationSessionData>;
@@ -68,7 +68,7 @@ interface ExtOp {
     value: any;
 }
 
-function createConversation<C extends Context>(
+export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
     id = builder.name,
 ): Middleware<ConversationFlavor<C>> {
@@ -130,10 +130,6 @@ function createConversation<C extends Context>(
     };
 }
 
-type ConversationContext<C extends Context> =
-    & C
-    & SessionFlavor<ConversationSessionData>;
-
 class Conversation<C extends Context> {
     private op = 0;
 
@@ -184,7 +180,7 @@ class Conversation<C extends Context> {
         this.opLog.entries.push(op);
     }
 
-    async wait(): Promise<ConversationContext<C>> {
+    async wait(): Promise<C> {
         if (this.replaying) return this.replayOp("wait");
         this.onWait.resolve();
         await new Promise(() => {}); // intercept function execution
