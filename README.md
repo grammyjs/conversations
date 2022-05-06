@@ -4,7 +4,7 @@
 
 > **WARNING: unstable.** This is not completely stable yet. Please try it out and provide feedback, either by opening an issue or in the [group chat](https://t.me/grammyjs).
 
-Here is an example for both Deno and Node of how you can use this package. It mainly exports `Conversation`, `ConversationFlavor`, and `createConersation`.
+Here is an example for both Deno and Node of how you can use this package. It mainly exports `Conversation`, `ConversationFlavor`, and `createConversation`.
 
 ## Deno
 
@@ -50,7 +50,7 @@ async function captcha(conversation: MyConversation, ctx: MyContext) {
 }
 
 bot.use(session({ initial: () => ({}) }));
-bot.use(createConversation(conversation));
+bot.use(createConversation(example));
 
 bot.command("start", (ctx) => ctx.reply("Hi! Send /enter"));
 bot.command("enter", async (ctx) => {
@@ -105,7 +105,7 @@ async function captcha(conversation: MyConversation, ctx: MyContext) {
 }
 
 bot.use(session({ initial: () => ({}) }));
-bot.use(createConversation(conversation));
+bot.use(createConversation(example));
 
 bot.command("start", (ctx) => ctx.reply("Hi! Send /enter"));
 bot.command("enter", async (ctx) => {
