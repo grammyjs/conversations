@@ -15,9 +15,9 @@ function ident<T>(arg: T) {
 }
 // Define which context properties are intrinsic to grammY and should not be
 // stored alongside the update object
-const CONTEXT_PROPS = new Set(["update, api, me"]);
-function NO_COPY(key: string) {
-    return CONTEXT_PROPS.has(key);
+const INTRINSIC_CONTEXT_PROPS = new Set(["update", "api", "me", "session"]);
+function IS_INTRINSIC(key: string) {
+    return INTRINSIC_CONTEXT_PROPS.has(key);
 }
 
 /**
@@ -112,7 +112,7 @@ interface OpLog {
 interface OpLogEntry {
     op: WaitOp | ApiOp | ExtOp;
 }
-/** A `wait` call was recorded onto the log */
+/** A `wait` call that was recorded onto the log */
 interface WaitOp {
     type: "wait";
     value: Update;
@@ -122,12 +122,12 @@ interface WaitOp {
      */
     extra: Record<string, unknown>;
 }
-/** A Bot API call was recorded onto the log */
+/** A Bot API call that was recorded onto the log */
 interface ApiOp {
     type: "api";
     value: ApiResponse<Awaited<ReturnType<RawApi[keyof RawApi]>>>;
 }
-/** An external operation was recorded onto the log */
+/** An external operation that was recorded onto the log */
 interface ExtOp {
     type: "ext";
     // deno-lint-ignore no-explicit-any
@@ -169,9 +169,32 @@ export function createConversation<C extends Context>(
             }
         }
 
+        /** Adds an entry for the current context object to the given log */
+        function addContextToLog(log: OpLog) {
+            // Need to log both update (in `value`) and all enumerable
+            // properties on the context object (in `extra`).
+            const value = ctx.update;
+            const extra: Record<string, unknown> = {
+                // Treat ctx.session differently, skip old conversation data
+                session: Object.fromEntries(
+                    Object.entries(ctx.session)
+                        .filter(([k]) => k !== "conversation"),
+                ),
+            };
+            // Copy over all remaining properties (except intrinsinc ones)
+            Object.keys(ctx)
+                .filter(IS_INTRINSIC)
+                .forEach((key) => extra[key] = (ctx)[key as keyof C]);
+            log.entries.push({ op: { type: "wait", value, extra } });
+        }
+
         /** Defines how to run a conversation builder function */
         async function run(log: OpLog, target = builder) {
-            // Used to catch `wait` calls, as we want to resume execution then
+            // First log the current context object, then invoke the target.
+            addContextToLog(log);
+
+            // Invoke target: Used to catch `wait` calls, as we want to resume
+            // execution then
             const onWait = interruptor();
             const conversation = new ConversationHandle<C>(
                 log,
@@ -179,13 +202,17 @@ export function createConversation<C extends Context>(
                 ctx.me,
                 onWait,
             );
-            // Call the target builder function supplied by the user, but don't
-            // blindly await it because when `wait` is called, execution is
-            // aborted, so the `Promise.race` intercepts this again and allows
-            // us to resume normal middleware handling.
-            await Promise.race([onWait.promise, target(conversation, ctx)]);
-            // Conversation function completed successfully if wait was not called
-            if (!onWait.waiting) exit();
+            try {
+                // Call the target builder function supplied by the user, but
+                // don't blindly await it because when `wait` is called,
+                // execution is aborted, so the `Promise.race` intercepts this
+                // again and allows us to resume normal middleware handling.
+                await Promise.race([onWait.promise, target(conversation, ctx)]);
+            } finally {
+                // If wait was not called, the conversation function completed
+                // normally (either by returning or by throwing), so we exit
+                if (!onWait.waiting) exit();
+            }
         }
 
         // Register conversation controls on context if we are the first
@@ -212,12 +239,8 @@ export function createConversation<C extends Context>(
         // Continue last conversation if we are active
         if (ctx.session?.conversation?.activeId === id) {
             const log = ctx.session.conversation.log;
-            const value = ctx.update;
-            const extra: Record<string, unknown> = {};
-            Object.keys(ctx)
-                .filter(NO_COPY)
-                .forEach((key) => extra[key] = (ctx)[key as keyof C]);
-            log.entries.push({ op: { type: "wait", value, extra } });
+
+            // Run conversation builder function
             await run(log);
             return;
         }
@@ -325,7 +348,8 @@ non-deterministic, or it relies on external data sources.`,
     }
 
     /**
-     * Waits for a new update (message, callback query, etc) from the user. Once received, this method returns a
+     * Waits for a new update (message, callback query, etc) from the user. Once
+     * received, this method returns a
      */
     async wait(): Promise<C> {
         // If this is an old wait, simply return the old context object
