@@ -40,7 +40,7 @@ const internal = Symbol("conversations");
  */
 class ConversationControls<C extends Context> {
     /** Index of all installed conversation builder functions */
-    [internal] = new Map<string, ConversationBuilder<C>>();
+    readonly [internal] = new Map<string, ConversationBuilder<C>>();
 
     constructor(
         private readonly session: ConversationSessionData | undefined,
@@ -56,6 +56,13 @@ class ConversationControls<C extends Context> {
 
     /** Enters a conversation with the given identifier */
     public enter(id: string) {
+        if (!this[internal].has(id)) {
+            const keys = Array.from(this[internal].keys());
+            const list = keys.map((key) => `'${key}'`).join(", ");
+            throw new Error(
+                `Conversation '${id}' is unknown! Known conversations are: ${list}`,
+            );
+        }
         const s = this.session;
         if (s === undefined) {
             throw new Error("Cannot enter a conversation without session!");
@@ -64,11 +71,10 @@ class ConversationControls<C extends Context> {
             throw new Error(
                 `Already in conversation '${s.conversation.activeId}'!`,
             );
-        } else {
-            // Simply set the active identifier to ours, we'll run the
-            // builder after the downstream middleware has completed.
-            s.conversation = { activeId: id, log: { entries: [] } };
         }
+        // Simply set the active identifier to ours, we'll run the
+        // builder after the downstream middleware has completed.
+        s.conversation = { activeId: id, log: { entries: [] } };
     }
 
     /**
@@ -107,7 +113,7 @@ interface OpLogEntry {
 /** A `wait` call that was recorded onto the log */
 interface WaitOp {
     type: "wait";
-    value: Update;
+    update: Update;
     /**
      * All enumerable properties on the context object which should be persisted
      * in the session and restored when replaying. Excludes intrinsic
@@ -124,38 +130,34 @@ interface ApiOp {
 interface ExtOp {
     type: "ext";
     // deno-lint-ignore no-explicit-any
-    value: any;
+    result: any;
 }
 
 /**
  * Creates a runner function which is in turn able to execute conversation
  * builder functions based on an op log.
  */
-function conversationRunner<C extends Context>(
-    ctx: ConversationFlavor<C>,
-    builder: ConversationBuilder<C>,
-) {
+function conversationRunner<C extends Context>(ctx: ConversationFlavor<C>) {
     /** Adds an entry for the current context object to the given log */
     function addContextToLog(log: OpLog) {
-        // Need to log both update (in `value`) and all enumerable
+        // Need to log both update (in `update`) and all enumerable
         // properties on the context object (in `extra`).
-        const value = ctx.update;
+        const { update, session } = ctx;
         const extra: Record<string, unknown> = {
             // Treat ctx.session differently, skip old conversation data
             session: Object.fromEntries(
-                Object.entries(ctx.session)
-                    .filter(([k]) => k !== "conversation"),
+                Object.entries(session).filter(([k]) => k !== "conversation"),
             ),
         };
         // Copy over all remaining properties (except intrinsic ones)
         Object.keys(ctx)
             .filter(IS_NOT_INTRINSIC)
-            .forEach((key) => extra[key] = (ctx)[key as keyof C]);
-        log.entries.push({ op: { type: "wait", value, extra } });
+            .forEach((key) => extra[key] = ctx[key as keyof C]);
+        log.entries.push({ op: { type: "wait", update, extra } });
     }
 
     /** Defines how to run a conversation builder function */
-    async function run(log: OpLog, target = builder) {
+    async function run(builder: ConversationBuilder<C>, log: OpLog) {
         // We are either starting the conversation builder function from
         // scratch, or we are beginning a replay operation. In both cases, the
         // current context object is new to the conversation builder function,
@@ -176,14 +178,12 @@ function conversationRunner<C extends Context>(
             // middleware handling.
             await Promise.race([
                 rsr.promise,
-                target(conversation, initialContext),
+                builder(conversation, initialContext),
             ]);
         } finally {
             // If wait was not called, the conversation function completed
             // normally (either by returning or by throwing), so we exit
-            if (!rsr.isResolved && ctx.session !== undefined) {
-                delete ctx.session.conversation;
-            }
+            if (!rsr.isResolved) ctx.conversation.exit();
         }
     }
 
@@ -205,7 +205,7 @@ export function createConversation<C extends Context>(
 ): Middleware<ConversationFlavor<C>> {
     return async (ctx, next) => {
         // Define how to run a conversation builder function
-        const run = conversationRunner(ctx, builder);
+        const run = conversationRunner(ctx);
 
         // Register conversation controls on context if we are the first
         // installed middleware on the bot (so it has not been registered yet)
@@ -221,7 +221,7 @@ export function createConversation<C extends Context>(
 
         // Continue last conversation if we are active
         if (ctx.session?.conversation?.activeId === id) {
-            await run(ctx.session.conversation.log);
+            await run(builder, ctx.session.conversation.log);
             return;
         }
 
@@ -231,7 +231,13 @@ export function createConversation<C extends Context>(
         // Run entered conversation if we are responsible
         if (first && ctx.session?.conversation !== undefined) {
             const { activeId, log } = ctx.session.conversation;
-            await run(log, map.get(activeId));
+            const target = map.get(activeId);
+            if (target === undefined) {
+                throw new Error(
+                    `Entered unknown conversation, cannot run '${activeId}'!`,
+                );
+            }
+            await run(target, log);
         }
     };
 }
@@ -312,13 +318,13 @@ non-deterministic, or it relies on external data sources.`,
             case "wait":
                 // Create fake context, and restore all enumerable properties
                 return Object.assign(
-                    new Context(op.value, this.api, this.me),
+                    new Context(op.update, this.api, this.me),
                     op.extra,
                 );
             case "api":
                 return op.response;
             case "ext":
-                return op.value;
+                return op.result;
         }
     }
     /**
@@ -386,7 +392,7 @@ non-deterministic, or it relies on external data sources.`,
         if (this._isReplaying) return await afterLoad(this._replayOp("ext"));
         // Otherwise, execute the task and log its result
         const value = await task(...args);
-        this._logOp({ op: { type: "ext", value: await beforeStore(value) } });
+        this._logOp({ op: { type: "ext", result: await beforeStore(value) } });
         return value;
     }
     /**
