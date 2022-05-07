@@ -20,8 +20,8 @@ type ConversationBuilder<C extends Context> = (
 ) => unknown | Promise<unknown>;
 /**
  * Context flavor for the conversations plugin. Adds the conversation control
- * panel `ctx.conversation` which e.g. allows entering a conversation, as well
- * as some properties to the session which the conversation plugin needs.
+ * panel `ctx.conversation` which e.g. allows entering a conversation. It also
+ * adds some properties to the session which the conversation plugin needs.
  */
 export type ConversationFlavor<C extends Context> =
     & C
