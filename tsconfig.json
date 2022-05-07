@@ -15,8 +15,5 @@
         "skipLibCheck": true,
         "target": "es2019"
     },
-    "include": ["src/"],
-    "deno2node": {
-        "vendorDir": "src/vendor"
-    }
+    "include": ["src/"]
 }
