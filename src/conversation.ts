@@ -203,6 +203,7 @@ export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
     id = builder.name,
 ): Middleware<ConversationFlavor<C>> {
+    if (!id) throw new Error("Cannot register a function without name!");
     return async (ctx, next) => {
         // Define how to run a conversation builder function
         const run = conversationRunner(ctx);
@@ -286,7 +287,7 @@ class ConversationHandle<C extends Context> {
 
     /**
      * Internal flag, `true` if the conversation is currently replaying in order
-     * to jump back to and old state, and `false` otherwise. Relying on this can
+     * to jump back to an old state, and `false` otherwise. Relying on this can
      * lead to very funky things, so only use this flag if you absolutely know
      * what you are doing. Most likely, you should not use this at all.
      */
@@ -396,14 +397,13 @@ non-deterministic, or it relies on external data sources.`,
         return value;
     }
     /**
-     * Delays the rest of the conversation by the specified number of
-     * milliseconds. You should use this instead of your own sleeping function
-     * so that you don't block the conversation while it is restoring a previous
-     * position.
+     * Sleep for the specified number of milliseconds. You should use this
+     * instead of your own sleeping function so that you don't block the
+     * conversation while it is restoring a previous position.
      *
      * @param milliseconds The number of milliseconds to wait
      */
-    async delay(milliseconds: number): Promise<void> {
+    async sleep(milliseconds: number): Promise<void> {
         if (this._isReplaying) return;
         await new Promise((r) => setTimeout(r, milliseconds));
     }
