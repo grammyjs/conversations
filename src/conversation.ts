@@ -417,4 +417,13 @@ non-deterministic, or it relies on external data sources.`,
     random() {
         return this.external({ task: () => Math.random() });
     }
+    /**
+     * Safely perform `console.log` calls, but only when they should really be
+     * logged (so not during replay operations).
+     *
+     * @param args Arguments to pass to `console.log`
+     */
+    log(...args: Parameters<typeof console.log>) {
+        if (!this._isReplaying) console.log(...args);
+    }
 }
