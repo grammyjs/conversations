@@ -24,30 +24,28 @@ export function IS_NOT_INTRINSIC(key: string) {
  *
  * The status flag `isResolved` indicates if `resolve` has been called or not.
  */
-export interface Resolver {
+export interface Resolver<T> {
     /** The promise which can be resolved by calling `resolve` */
-    promise: Promise<void>;
+    promise: Promise<T>;
+    /** Value of the promise, if is it resolved, and undefined otherwise */
+    value?: T;
     /** Resolves the promise of this resolver */
-    resolve: () => void;
+    resolve(t: T): void;
     /**
      * A flag indicating whether `resolve` has been called, i.e. whether the
      * promise has been resolved. Has the value `true` until `resolve` is
      * called.
      */
-    isResolved: boolean;
+    isResolved(): this is { value: T };
 }
 /** Creates a new resolver */
-export function resolver(): Resolver {
-    const rsr: Resolver = {
-        isResolved: false,
-        // those two will be overwritten immediately:
-        resolve: () => {},
-        promise: Promise.resolve(),
-    };
+export function resolver<T>(): Resolver<T> {
+    const rsr = { isResolved: () => false } as Resolver<T>;
     rsr.promise = new Promise((resolve) => {
-        rsr.resolve = () => {
-            rsr.isResolved = true;
-            resolve();
+        rsr.resolve = (t: T) => {
+            rsr.isResolved = () => true;
+            rsr.value = t;
+            resolve(t);
         };
     });
     return rsr;

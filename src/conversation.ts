@@ -2,7 +2,7 @@ import {
     type Api,
     type ApiResponse,
     Context,
-    type Middleware,
+    type MiddlewareFn,
     type RawApi,
     type SessionFlavor,
     type Update,
@@ -23,10 +23,14 @@ type ConversationBuilder<C extends Context> = (
  * panel `ctx.conversation` which e.g. allows entering a conversation. It also
  * adds some properties to the session which the conversation plugin needs.
  */
-export type ConversationFlavor<C extends Context> =
-    & C
-    & { conversation: ConversationControls<C> }
+export type ConversationFlavor =
+    & { conversation: ConversationControls }
     & SessionFlavor<ConversationSessionData>;
+
+interface Internals {
+    /** Known conversation identifiers, used for collision checking */
+    ids: Set<string>;
+}
 
 /**
  * Used to store data invisibly on context object inside the conversation
@@ -38,54 +42,72 @@ const internal = Symbol("conversations");
  * `ctx.conversation`. It allows you to enter and exit conversations, and to
  * inspect which conversation is currently active.
  */
-class ConversationControls<C extends Context> {
-    /** Index of all installed conversation builder functions */
-    readonly [internal] = new Map<string, ConversationBuilder<C>>();
+class ConversationControls {
+    /** List of all conversations to be started */
+    readonly [internal]: Internals = { ids: new Set() };
 
     constructor(
         private readonly session: ConversationSessionData | undefined,
     ) {}
 
     /**
-     * Identifier of the currently active conversation. Undefined if no
-     * conversation is active at the moment.
+     * Returns a map of the identifiers of currently active conversations to the
+     * number of times this conversation is active in the current chat. For
+     * example, you can use `"captcha" in ctx.conversation.active` to check if
+     * there are any active conversations in this chat with the identifier
+     * `"captcha"`.
      */
-    get activeId() {
-        return this.session?.conversation?.activeId;
+    get active() {
+        return Object.fromEntries(
+            Object.entries(this.session?.conversation ?? {})
+                .map(([id, conversations]) => [id, conversations.length]),
+        );
     }
 
     /** Enters a conversation with the given identifier */
-    public enter(id: string) {
-        if (!this[internal].has(id)) {
-            const keys = Array.from(this[internal].keys());
-            const list = keys.map((key) => `'${key}'`).join(", ");
-            throw new Error(
-                `Conversation '${id}' is unknown! Known conversations are: ${list}`,
-            );
-        }
-        const s = this.session;
-        if (s === undefined) {
-            throw new Error("Cannot enter a conversation without session!");
-        }
-        if (s.conversation !== undefined) {
-            throw new Error(
-                `Already in conversation '${s.conversation.activeId}'!`,
-            );
-        }
-        // Simply set the active identifier to ours, we'll run the
-        // builder after the downstream middleware has completed.
-        s.conversation = { activeId: id, log: { entries: [] } };
+    public enter(id: string, _opts: {
+        /**
+         * Specify `true` if all running conversations in the same chat should
+         * be terminated before entering this conversation. Defaults to `false`.
+         */
+        overwrite?: boolean;
+    } = {}): Promise<void> {
+        const known = Array.from(this[internal].ids.values())
+            .map((id) => `'${id}'`)
+            .join(", ");
+        throw new Error(
+            `The conversation '${id}' has not been registered! Known conversations are: ${known}`,
+        );
     }
 
     /**
-     *  Hard-kills a conversation as soon as the next `wait` call is reached.
-     *  Performed implicitly if the conversation builder function completes or
-     *  errors.
+     * Kills all conversations with the given identifier (if any) and enters a
+     * new conversation for this identifier. Equivalent to passing `overwrite:
+     * true` to `enter`.
      */
-    public exit() {
-        if (this.session?.conversation !== undefined) {
-            // Simply clear the log and the active identifier
-            delete this.session.conversation;
+    public reenter(id: string) {
+        this.enter(id, { overwrite: true });
+    }
+
+    /**
+     * Hard-kills all conversations for a given identifier. Note that the normal
+     * way for conversations to exit is for their conversation builder function
+     * to complete (return or throw).
+     *
+     * If no identifier is specified, all running conversations of all
+     * identifiers will be killed.
+     */
+    public exit(id?: string) {
+        const s = this.session;
+        if (s?.conversation === undefined) return;
+        if (id === undefined) {
+            // Simply clear all conversation data
+            delete s.conversation;
+        } else {
+            // Strip out specified conversations from active ones
+            delete s.conversation[id];
+            // Do not store empty array
+            if (Object.keys(s.conversation).length === 0) delete s.conversation;
         }
     }
 }
@@ -93,15 +115,14 @@ class ConversationControls<C extends Context> {
 /** Data which the conversation plugin adds to `ctx.session` */
 interface ConversationSessionData {
     /** Internal data used by the conversation plugin. Do not modify. */
-    conversation?: {
-        /** Identifier of the currently active conversation */
-        activeId: string;
-        /**
-         * Log of operations that were performed so far in the conversation.
-         * Used to replay past operations when resuming.
-         */
-        log: OpLog;
-    };
+    conversation?: Record<string, ActiveConversation[]>;
+}
+interface ActiveConversation {
+    /**
+     * Log of operations that were performed so far in the conversation.
+     * Used to replay past operations when resuming.
+     */
+    log: OpLog;
 }
 /** Log of operations */
 interface OpLog {
@@ -133,13 +154,23 @@ interface ExtOp {
     result: any;
 }
 
+/** Ops that can lead to intertuption of function execution */
+type ResolveOps = "wait" | "skip" | "done";
+
 /**
  * Creates a runner function which is in turn able to execute conversation
  * builder functions based on an op log.
  */
-function conversationRunner<C extends Context>(ctx: ConversationFlavor<C>) {
-    /** Adds an entry for the current context object to the given log */
-    function addContextToLog(log: OpLog) {
+function conversationRunner<C extends Context>(
+    ctx: C & ConversationFlavor,
+    builder: ConversationBuilder<C>,
+) {
+    /**
+     * Adds an entry for the current context object to the given log,
+     * effectively turning the most recent wait op into a old wait which will be
+     * replayed
+     */
+    function receiveUpdate(log: OpLog) {
         // Need to log both update (in `update`) and all enumerable
         // properties on the context object (in `extra`).
         const { update, session } = ctx;
@@ -156,38 +187,51 @@ function conversationRunner<C extends Context>(ctx: ConversationFlavor<C>) {
         log.entries.push({ op: { type: "wait", update, extra } });
     }
 
-    /** Defines how to run a conversation builder function */
-    async function run(builder: ConversationBuilder<C>, log: OpLog) {
+    /**
+     * Defines how to run a conversation builder function. Returns `false` if
+     * the conversation decided to pass on the control flow, and `true` if it
+     * handled the update, i.e. completed normally or via a wait call. Note that
+     * this function re-throws errors thrown by the conversation.
+     */
+    async function run(log: OpLog) {
         // We are either starting the conversation builder function from
         // scratch, or we are beginning a replay operation. In both cases, the
         // current context object is new to the conversation builder function,
         // be it the inital context object or the result of a `wait` call.
         // Hence, we should log the current context object.
-        addContextToLog(log);
+        receiveUpdate(log);
         // Now, we invoke the conversation builder function.
         const { api, me } = ctx;
-        const rsr = resolver(); // used to catch `wait` calls
-        const conversation = new ConversationHandle<C>(log, api, me, rsr);
+        const rsr = resolver<ResolveOps>(); // used to catch `wait` calls
+        const handle = new ConversationHandle<C>(log, api, me, rsr);
         // Replay the initial context object manually
-        const initialContext = conversation._replayOp("wait");
+        const initialContext = handle._replayOp("wait");
+        // Call the target builder function supplied by the user, but
+        // don't blindly await it because when `wait` is called
+        // somewhere inside, execution is aborted. The `Promise.race`
+        // intercepts this again and allows us to resume normal
+        // middleware handling.
         try {
-            // Call the target builder function supplied by the user, but
-            // don't blindly await it because when `wait` is called
-            // somewhere inside, execution is aborted. The `Promise.race`
-            // intercepts this again and allows us to resume normal
-            // middleware handling.
-            await Promise.race([
-                rsr.promise,
-                builder(conversation, initialContext),
-            ]);
+            await Promise.race([rsr.promise, builder(handle, initialContext)]);
         } finally {
-            // If wait was not called, the conversation function completed
-            // normally (either by returning or by throwing), so we exit
-            if (!rsr.isResolved) ctx.conversation.exit();
+            handle._deactivate();
         }
+        return rsr.value ?? "done";
     }
 
     return run;
+}
+
+export function conversations<C extends Context>(): MiddlewareFn<
+    C & ConversationFlavor
+> {
+    return async (ctx, next) => {
+        if (ctx.session === undefined) {
+            throw new Error("Cannot register a conversation without session!");
+        }
+        ctx.conversation ??= new ConversationControls(ctx.session);
+        await next();
+    };
 }
 
 /**
@@ -202,43 +246,90 @@ function conversationRunner<C extends Context>(ctx: ConversationFlavor<C>) {
 export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
     id = builder.name,
-): Middleware<ConversationFlavor<C>> {
+): MiddlewareFn<C & ConversationFlavor> {
     if (!id) throw new Error("Cannot register a function without name!");
     return async (ctx, next) => {
-        // Define how to run a conversation builder function
-        const run = conversationRunner(ctx);
+        if (ctx.conversation === undefined) {
+            throw new Error(
+                "Cannot register a conversation without first installing the conversations plugin!",
+            );
+        }
 
-        // Register conversation controls on context if we are the first
-        // installed middleware on the bot (so it has not been registered yet)
-        const first = ctx.conversation === undefined;
-        if (first) ctx.conversation = new ConversationControls(ctx.session);
+        // Define how to run a conversation builder function
+        const runOnLog = conversationRunner(ctx, builder);
+
+        /**
+         * Runs our conversation builder function for all given logs in
+         * ascending order until the first decides to handle the update.
+         */
+        async function runUntilComplete(conversations: ActiveConversation[]) {
+            let op: ResolveOps = "skip";
+            for (let i = 0; op === "skip" && i < conversations.length; i++) {
+                const current = conversations[i];
+                try {
+                    op = await runOnLog(current.log);
+                } finally {
+                    if (op === "done") {
+                        conversations.splice(i, 1);
+                    }
+                }
+            }
+            return op;
+        }
 
         // Add ourselves to the conversation index
-        const map = ctx.conversation[internal];
-        if (map.has(id)) {
+        const index = ctx.conversation[internal].ids;
+        if (index.has(id)) {
             throw new Error(`Duplicate conversation identifier '${id}'!`);
         }
-        map.set(id, builder);
+        index.add(id);
 
-        // Continue last conversation if we are active
-        if (ctx.session?.conversation?.activeId === id) {
-            await run(builder, ctx.session.conversation.log);
-            return;
-        }
-
-        // No conversation running, call downstream middleware
-        await next();
-
-        // Run entered conversation if we are responsible
-        if (first && ctx.session?.conversation !== undefined) {
-            const { activeId, log } = ctx.session.conversation;
-            const target = map.get(activeId);
-            if (target === undefined) {
-                throw new Error(
-                    `Entered unknown conversation, cannot run '${activeId}'!`,
-                );
+        // Register ourselves in the enter function
+        const oldEnter: ConversationControls["enter"] = (id, opts) =>
+            ctx.conversation.enter(id, opts);
+        ctx.conversation.enter = async (enterId, opts) => {
+            if (enterId !== id) {
+                await oldEnter(enterId, opts);
+                return;
             }
-            await run(target, log);
+            ctx.session.conversation ??= {};
+            const entry: ActiveConversation = { log: { entries: [] } };
+            if (opts?.overwrite) ctx.session.conversation[id] = [entry];
+            else (ctx.session.conversation[id] ??= []).push(entry);
+            try {
+                await runUntilComplete([entry]);
+            } finally {
+                if (ctx.session.conversation[id].length === 0) {
+                    delete ctx.session.conversation[id];
+                }
+            }
+        };
+
+        try {
+            // Run all existing conversations with our identifier
+            let op: ResolveOps = "skip";
+            if (ctx.session.conversation?.[id] !== undefined) {
+                try {
+                    op = await runUntilComplete(ctx.session.conversation[id]);
+                } finally {
+                    // Clean up if no logs remain
+                    if (ctx.session.conversation[id].length === 0) {
+                        delete ctx.session.conversation[id];
+                    }
+                }
+            }
+
+            // If all ran conversations (if any) called skip as their last op, we
+            // run the downstream middleware
+            if (op === "skip") await next();
+        } finally {
+            // Clean up if no conversations remain
+            if (
+                ctx.session.conversation !== undefined &&
+                Object.keys(ctx.session.conversation).length === 0
+            ) {
+                delete ctx.session.conversation;
+            }
         }
     };
 }
@@ -261,28 +352,37 @@ export function createConversation<C extends Context>(
  * Check out the documentation to learn more about how to create conversations.
  */
 export type Conversation<C extends Context> = ConversationHandle<C>;
-class ConversationHandle<C extends Context> {
+/**
+ * Internally used class which acts as a conversation handle.
+ */
+export class ConversationHandle<C extends Context> {
     /**
      * Index in the op log of the current replay operation. Points at the
      * next empty op log index if no replay operation is in progress. Note
      * that in the latter case, it equals the length of the op log.
      */
     private replayOpIndex = 0;
+    private active = true;
 
     constructor(
         private readonly opLog: OpLog,
         private api: Api,
         private me: UserFromGetMe,
-        private rsr: Resolver,
+        private rsr: Resolver<ResolveOps>,
     ) {
         // We intercept Bot API calls, returning logged responses while
         // replaying, and logging the responses of performed calls otherwise.
         api.config.use(async (prev, method, payload, signal) => {
+            if (!this.active) return prev(method, payload, signal);
             if (this._isReplaying) return this._replayOp("api");
             const response = await prev(method, payload, signal);
             this._logOp({ op: { type: "api", response: response } });
             return response;
         });
+    }
+
+    _deactivate() {
+        this.active = false;
     }
 
     /**
@@ -340,6 +440,12 @@ non-deterministic, or it relies on external data sources.`,
         if (!this._isReplaying) this.replayOpIndex++;
         this.opLog.entries.push(op);
     }
+    _unlogOp() {
+        const op = this.opLog.entries.pop();
+        if (op === undefined) throw new Error("Empty log, cannot unlog!");
+        if (!this._isReplaying) this.replayOpIndex--;
+        return op;
+    }
 
     /**
      * Waits for a new update (e.g. a message, callback query, etc) from the
@@ -351,12 +457,40 @@ non-deterministic, or it relies on external data sources.`,
         if (this._isReplaying) return this._replayOp("wait");
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
-        this.rsr.resolve();
+        this.rsr.resolve("wait");
         // Intercept function execution
-        await new Promise(() => {}); // BOOM
+        await new Promise<never>(() => {}); // BOOM
         // deno-lint-ignore no-explicit-any
         return 0 as any; // dead code
     }
+
+    /**
+     * Skips handling the update that was received in the last `wait` call. Once
+     * called, the conversation resets to the last `wait` call, as if the update
+     * had never been received. The control flow is passed on immediately, so
+     * that downstream middleware can continue handling the update.
+     *
+     * Effectively, calling `await conversation.skip()` behaves as if this
+     * conversation had not received the update at all.
+     *
+     * Make sure not to perform any actions
+     */
+    async skip() {
+        // We decided not to handle this update, so we purge all log entries
+        // until the most recent wait entry inclusively from the log, before
+        // passing on the control flow
+        const log = this.opLog.entries;
+        let reachedWait = false;
+        do {
+            reachedWait = this._unlogOp().op.type === "wait";
+        } while (!reachedWait && log.length > 0);
+        // Notify the resolver so that we can catch the function interception
+        // and resume middleware execution normally outside of the conversation
+        this.rsr.resolve("skip");
+        // Intercept function execution
+        return await new Promise<never>(() => {}); // BOOM
+    }
+
     /**
      * Safely performs an operation with side-effects. You must use this to wrap
      * all communication with external systems that does not go through grammY,
