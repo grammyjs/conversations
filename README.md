@@ -10,14 +10,19 @@ Here is an example for both Deno and Node of how you can use this package. It ma
 ## Deno
 
 ```ts
-import { Bot, Context, session } from "https://deno.land/x/grammy/mod.ts";
+import {
+    Bot,
+    Context,
+    session,
+} from "https://deno.land/x/grammy@v1.8.3/mod.ts";
 import {
     type Conversation,
     type ConversationFlavor,
+    conversations,
     createConversation,
-} from "https://deno.land/x/grammy_conversations/mod.ts";
+} from "./src/mod.ts";
 
-type MyContext = ConversationFlavor<Context>;
+type MyContext = Context & ConversationFlavor;
 type MyConversation = Conversation<MyContext>;
 
 const bot = new Bot<MyContext>("");
@@ -31,11 +36,13 @@ async function example(conversation: MyConversation, ctx: MyContext) {
         return;
     }
     const text0 = ctx.message.text;
+    conversation.log(text0);
     do {
         await ctx.reply("Send another text message!");
         ctx = await conversation.wait();
     } while (!ctx.message?.text);
     const text1 = ctx.message.text;
+    conversation.log(text1);
     await ctx.reply(`You first wrote ${text0} and then ${text1}`);
     await ctx.reply("Thanks for participating!");
 }
@@ -50,14 +57,22 @@ async function captcha(conversation: MyConversation, ctx: MyContext) {
     await ctx.reply("Humanity saved, you may pass!");
 }
 
-bot.use(session({ initial: () => ({}) }));
+bot.use(
+    session({
+        initial: () => ({}),
+    }),
+);
+
+bot.use(conversations());
 bot.use(createConversation(example));
 
-bot.command("start", (ctx) => ctx.reply("Hi! Send /enter"));
 bot.command("enter", async (ctx) => {
     await ctx.reply("Entering conversation!");
-    ctx.conversation.enter("example"); // enter the function "example" you declared
+    await ctx.conversation.enter("example"); // enter the function "example" you declared
 });
+
+bot.command("start", (ctx) => ctx.reply("Hi! Send /enter"));
+bot.use((ctx) => ctx.reply("What a nice update."));
 
 bot.start();
 ```
@@ -69,10 +84,11 @@ import { Bot, Context, session } from "grammy";
 import {
     type Conversation,
     type ConversationFlavor,
+    conversations,
     createConversation,
 } from "@grammyjs/conversations";
 
-type MyContext = ConversationFlavor<Context>;
+type MyContext = Context & ConversationFlavor;
 type MyConversation = Conversation<MyContext>;
 
 const bot = new Bot<MyContext>("");
@@ -86,11 +102,13 @@ async function example(conversation: MyConversation, ctx: MyContext) {
         return;
     }
     const text0 = ctx.message.text;
+    conversation.log(text0);
     do {
         await ctx.reply("Send another text message!");
         ctx = await conversation.wait();
     } while (!ctx.message?.text);
     const text1 = ctx.message.text;
+    conversation.log(text1);
     await ctx.reply(`You first wrote ${text0} and then ${text1}`);
     await ctx.reply("Thanks for participating!");
 }
@@ -105,14 +123,22 @@ async function captcha(conversation: MyConversation, ctx: MyContext) {
     await ctx.reply("Humanity saved, you may pass!");
 }
 
-bot.use(session({ initial: () => ({}) }));
+bot.use(
+    session({
+        initial: () => ({}),
+    }),
+);
+
+bot.use(conversations());
 bot.use(createConversation(example));
 
-bot.command("start", (ctx) => ctx.reply("Hi! Send /enter"));
 bot.command("enter", async (ctx) => {
     await ctx.reply("Entering conversation!");
-    ctx.conversation.enter("example"); // enter the function "example" you declared
+    await ctx.conversation.enter("example"); // enter the function "example" you declared
 });
+
+bot.command("start", (ctx) => ctx.reply("Hi! Send /enter"));
+bot.use((ctx) => ctx.reply("What a nice update."));
 
 bot.start();
 ```
