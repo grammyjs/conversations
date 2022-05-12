@@ -2,10 +2,14 @@ import {
     type Api,
     type ApiResponse,
     Context,
+    type Filter,
+    type FilterQuery,
+    matchFilter,
     type MiddlewareFn,
     type RawApi,
     type SessionFlavor,
     type Update,
+    type User,
     type UserFromGetMe,
 } from "./deps.deno.ts";
 import { ident, IS_NOT_INTRINSIC, type Resolver, resolver } from "./utils.ts";
@@ -15,7 +19,7 @@ import { ident, IS_NOT_INTRINSIC, type Resolver, resolver } from "./utils.ts";
  * conversation.
  */
 type ConversationBuilder<C extends Context> = (
-    t: Conversation<C>,
+    conversation: Conversation<C>,
     ctx: C,
 ) => unknown | Promise<unknown>;
 /**
@@ -236,7 +240,8 @@ export function conversations<C extends Context>(): MiddlewareFn<
 
 /**
  * Takes a conversation builder function, and turns it into grammY middleware
- * which can be installed on your bot. Check out the documentation to learn more
+ * which can be installed on your bot. Check out the
+ * [documentation](https://grammy.dev/plugins/conversations.html) to learn more
  * about how conversation builder functions can be created.
  *
  * @param builder Conversation builder function
@@ -349,7 +354,8 @@ export function createConversation<C extends Context>(
  * }
  * ```
  *
- * Check out the documentation to learn more about how to create conversations.
+ * Check out the [documentation](https://grammy.dev/plugins/conversations.html)
+ * to learn more about how to create conversations.
  */
 export type Conversation<C extends Context> = ConversationHandle<C>;
 /**
@@ -464,6 +470,44 @@ non-deterministic, or it relies on external data sources.`,
         return 0 as any; // dead code
     }
 
+    async waitUntil<D extends C>(
+        predicate: (ctx: C) => ctx is D,
+    ): Promise<D>;
+    async waitUntil(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+    ): Promise<C>;
+    async waitUntil(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+    ): Promise<C> {
+        const ctx = await this.wait();
+        if (!await predicate(ctx)) await this.skip();
+        return ctx;
+    }
+
+    async waitUnless(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+    ): Promise<C> {
+        return await this.waitUntil(async (ctx) => !await predicate(ctx));
+    }
+
+    async waitFor<Q extends FilterQuery>(
+        query: Q | Q[],
+    ): Promise<Filter<C, Q>> {
+        const predicate: (ctx: C) => ctx is Filter<C, Q> = matchFilter(query);
+        return await this.waitUntil(predicate);
+    }
+
+    async waitFrom(user: number | User): Promise<C & { from: User }> {
+        const id = typeof user === "number" ? user : user.id;
+        const predicate = (ctx: C): ctx is C & { from: User } =>
+            ctx.from?.id === id;
+        return await this.waitUntil(predicate);
+    }
+
+    // TODO: implement command matching
+    // TODO: implement hears matching
+    // TODO: implement callback, game, and inline query matching
+
     /**
      * Skips handling the update that was received in the last `wait` call. Once
      * called, the conversation resets to the last `wait` call, as if the update
@@ -473,7 +517,9 @@ non-deterministic, or it relies on external data sources.`,
      * Effectively, calling `await conversation.skip()` behaves as if this
      * conversation had not received the update at all.
      *
-     * Make sure not to perform any actions
+     * Make sure not to perform any actions between the last wait call and the
+     * skip call. While the conversation rewinds its log internally, it does not
+     * unsend messages that you sent between calling `wait` and calling `skip`.
      */
     async skip() {
         // We decided not to handle this update, so we purge all log entries
