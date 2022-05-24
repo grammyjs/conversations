@@ -274,12 +274,9 @@ export function createConversation<C extends Context>(
                 try {
                     op = await runOnLog(current.log);
                 } finally {
-                    console.log(op);
-                    console.log(conversations);
                     if (op === "done") {
                         conversations.splice(i, 1);
                     }
-                    console.log(conversations);
                 }
             }
             return op;
