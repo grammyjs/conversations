@@ -299,12 +299,15 @@ export function createConversation<C extends Context>(
             ctx.session.conversation ??= {};
             const entry: ActiveConversation = { log: { entries: [] } };
             const append = [entry];
+            if (opts?.overwrite) ctx.session.conversation[id] = append;
+            else (ctx.session.conversation[id] ??= []).push(...append);
+            const pos = ctx.session.conversation[id].length - 1;
             try {
                 await runUntilComplete(append);
             } finally {
-                if (opts?.overwrite) ctx.session.conversation[id] = append;
-                else (ctx.session.conversation[id] ??= []).push(...append);
-
+                if (append.length === 0) {
+                    ctx.session.conversation[id].splice(pos, 1);
+                }
                 if (ctx.session.conversation[id].length === 0) {
                     delete ctx.session.conversation[id];
                 }
