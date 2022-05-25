@@ -290,8 +290,7 @@ export function createConversation<C extends Context>(
         index.add(id);
 
         // Register ourselves in the enter function
-        const oldEnter: ConversationControls["enter"] = (id, opts) =>
-            ctx.conversation.enter(id, opts);
+        const oldEnter = ctx.conversation.enter.bind(ctx.conversation);
         ctx.conversation.enter = async (enterId, opts) => {
             if (enterId !== id) {
                 await oldEnter(enterId, opts);
@@ -299,11 +298,16 @@ export function createConversation<C extends Context>(
             }
             ctx.session.conversation ??= {};
             const entry: ActiveConversation = { log: { entries: [] } };
-            if (opts?.overwrite) ctx.session.conversation[id] = [entry];
-            else (ctx.session.conversation[id] ??= []).push(entry);
+            const append = [entry];
+            if (opts?.overwrite) ctx.session.conversation[id] = append;
+            else (ctx.session.conversation[id] ??= []).push(...append);
+            const pos = ctx.session.conversation[id].length - 1;
             try {
-                await runUntilComplete([entry]);
+                await runUntilComplete(append);
             } finally {
+                if (append.length === 0) {
+                    ctx.session.conversation[id].splice(pos, 1);
+                }
                 if (ctx.session.conversation[id].length === 0) {
                     delete ctx.session.conversation[id];
                 }
