@@ -273,11 +273,11 @@ export function createConversation<C extends Context>(
                 const current = conversations[i];
                 try {
                     op = await runOnLog(current.log);
-                } finally {
-                    if (op === "done") {
-                        conversations.splice(i, 1);
-                    }
+                } catch (e) {
+                    conversations.splice(i, 1);
+                    throw e;
                 }
+                if (op === "done") conversations.splice(i, 1);
             }
             return op;
         }
