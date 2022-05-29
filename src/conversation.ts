@@ -155,7 +155,7 @@ interface ApiOp {
 interface ExtOp {
     type: "ext";
     // deno-lint-ignore no-explicit-any
-    result: any;
+    result: { ok: true; value: any } | { ok: false; error: unknown };
 }
 
 /** Ops that can lead to intertuption of function execution */
@@ -384,7 +384,8 @@ export class ConversationHandle<C extends Context> {
         // replaying, and logging the responses of performed calls otherwise.
         api.config.use(async (prev, method, payload, signal) => {
             if (!this.active) return prev(method, payload, signal);
-            if (this._isReplaying) return this._replayOp("api");
+            // deno-lint-ignore no-explicit-any
+            if (this._isReplaying) return this._replayOp("api") as any;
             const response = await prev(method, payload, signal);
             this._logOp({ op: { type: "api", response: response } });
             return response;
@@ -410,7 +411,10 @@ export class ConversationHandle<C extends Context> {
      * lead to very funky things, so only use this flag if you absolutely know
      * what you are doing. Most likely, you should not use this at all.
      */
-    _replayOp<T extends OpLogEntry["op"]["type"]>(expectedType: T) {
+    _replayOp(expectedType: "wait"): C;
+    _replayOp(expectedType: "api"): ApiOp["response"];
+    _replayOp(expectedType: "ext"): ExtOp["result"];
+    _replayOp(expectedType: OpLogEntry["op"]["type"]) {
         if (!this._isReplaying) {
             throw new Error(
                 "Replay stack exhausted, you may not call this method!",
@@ -431,7 +435,7 @@ non-deterministic, or it relies on external data sources.`,
                 return Object.assign(
                     new Context(op.update, this.api, this.me),
                     op.extra,
-                );
+                ) as C;
             case "api":
                 return op.response;
             case "ext":
@@ -562,23 +566,47 @@ non-deterministic, or it relies on external data sources.`,
      */
     // deno-lint-ignore no-explicit-any
     async external<F extends (...args: any[]) => any, I = any>(
-        op: {
+        op: F | {
             /** An operation to perform */
             task: F;
             /** Parameters to supply to the operation */
             args?: Parameters<F>;
-            /** Prepare the result for  */
+            /** Prepare the result for storing */
             beforeStore?: (value: ReturnType<F>) => I | Promise<I>;
+            /** Recover a result after storing */
             afterLoad?: (value: I) => ReturnType<F> | Promise<ReturnType<F>>;
+            /** Prepare the result for storing */
+            beforeStoreError?: (value: unknown) => unknown | Promise<unknown>;
+            /** Recover a result after storing */
+            afterLoadError?: (value: unknown) => unknown;
         },
     ): Promise<Awaited<ReturnType<F>>> {
-        const { task, args = [], beforeStore = ident, afterLoad = ident } = op;
+        if (typeof op === "function") op = { task: op };
+        const {
+            task,
+            args = [],
+            beforeStore = ident,
+            afterLoad = ident,
+            beforeStoreError = ident,
+            afterLoadError = ident,
+        } = op;
         // Return the old result if we are replaying
-        if (this._isReplaying) return await afterLoad(this._replayOp("ext"));
+        if (this._isReplaying) {
+            const result = this._replayOp("ext");
+            if (result.ok) return await afterLoad(result.value);
+            else throw await afterLoadError(result.error);
+        }
         // Otherwise, execute the task and log its result
-        const value = await task(...args);
-        this._logOp({ op: { type: "ext", result: await beforeStore(value) } });
-        return value;
+        try {
+            const result = await task(...args);
+            const value = await beforeStore(result);
+            this._logOp({ op: { type: "ext", result: { ok: true, value } } });
+            return result;
+        } catch (value) {
+            const error = await beforeStoreError(value);
+            this._logOp({ op: { type: "ext", result: { ok: false, error } } });
+            throw value;
+        }
     }
     /**
      * Sleep for the specified number of milliseconds. You should use this
