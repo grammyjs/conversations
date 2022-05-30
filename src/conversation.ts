@@ -4,6 +4,7 @@ import {
     Context,
     type Filter,
     type FilterQuery,
+    type LazySessionFlavor,
     matchFilter,
     type MiddlewareFn,
     type RawApi,
@@ -29,7 +30,10 @@ type ConversationBuilder<C extends Context> = (
  */
 export type ConversationFlavor =
     & { conversation: ConversationControls }
-    & SessionFlavor<ConversationSessionData>;
+    & (
+        | SessionFlavor<ConversationSessionData>
+        | LazySessionFlavor<ConversationSessionData>
+    );
 
 interface Internals {
     /** Known conversation identifiers, used for collision checking */
@@ -51,7 +55,7 @@ class ConversationControls {
     readonly [internal]: Internals = { ids: new Set() };
 
     constructor(
-        private readonly session: ConversationSessionData | undefined,
+        private readonly session: ConversationSessionData,
     ) {}
 
     /**
@@ -63,7 +67,7 @@ class ConversationControls {
      */
     get active() {
         return Object.fromEntries(
-            Object.entries(this.session?.conversation ?? {})
+            Object.entries(this.session.conversation ?? {})
                 .map(([id, conversations]) => [id, conversations.length]),
         );
     }
@@ -102,16 +106,18 @@ class ConversationControls {
      * identifiers will be killed.
      */
     public exit(id?: string) {
-        const s = this.session;
-        if (s?.conversation === undefined) return;
+        const session = this.session;
+        if (session.conversation === undefined) return;
         if (id === undefined) {
             // Simply clear all conversation data
-            delete s.conversation;
+            delete session.conversation;
         } else {
             // Strip out specified conversations from active ones
-            delete s.conversation[id];
-            // Do not store empty array
-            if (Object.keys(s.conversation).length === 0) delete s.conversation;
+            delete session.conversation[id];
+            // Do not store empty object
+            if (Object.keys(session.conversation).length === 0) {
+                delete session.conversation;
+            }
         }
     }
 }
@@ -230,10 +236,11 @@ export function conversations<C extends Context>(): MiddlewareFn<
     C & ConversationFlavor
 > {
     return async (ctx, next) => {
-        if (ctx.session === undefined) {
+        const session = await ctx.session;
+        if (session === undefined) {
             throw new Error("Cannot register a conversation without session!");
         }
-        ctx.conversation ??= new ConversationControls(ctx.session);
+        ctx.conversation ??= new ConversationControls(session);
         await next();
     };
 }
@@ -296,34 +303,36 @@ export function createConversation<C extends Context>(
                 await oldEnter(enterId, opts);
                 return;
             }
-            ctx.session.conversation ??= {};
+            const session = await ctx.session;
+            session.conversation ??= {};
             const entry: ActiveConversation = { log: { entries: [] } };
             const append = [entry];
-            if (opts?.overwrite) ctx.session.conversation[id] = append;
-            else (ctx.session.conversation[id] ??= []).push(...append);
-            const pos = ctx.session.conversation[id].length - 1;
+            if (opts?.overwrite) session.conversation[id] = append;
+            else (session.conversation[id] ??= []).push(...append);
+            const pos = session.conversation[id].length - 1;
             try {
                 await runUntilComplete(append);
             } finally {
                 if (append.length === 0) {
-                    ctx.session.conversation[id].splice(pos, 1);
+                    session.conversation[id].splice(pos, 1);
                 }
-                if (ctx.session.conversation[id].length === 0) {
-                    delete ctx.session.conversation[id];
+                if (session.conversation[id].length === 0) {
+                    delete session.conversation[id];
                 }
             }
         };
 
+        const session = await ctx.session;
         try {
             // Run all existing conversations with our identifier
             let op: ResolveOps = "skip";
-            if (ctx.session.conversation?.[id] !== undefined) {
+            if (session.conversation?.[id] !== undefined) {
                 try {
-                    op = await runUntilComplete(ctx.session.conversation[id]);
+                    op = await runUntilComplete(session.conversation[id]);
                 } finally {
                     // Clean up if no logs remain
-                    if (ctx.session.conversation[id].length === 0) {
-                        delete ctx.session.conversation[id];
+                    if (session.conversation[id].length === 0) {
+                        delete session.conversation[id];
                     }
                 }
             }
@@ -334,10 +343,10 @@ export function createConversation<C extends Context>(
         } finally {
             // Clean up if no conversations remain
             if (
-                ctx.session.conversation !== undefined &&
-                Object.keys(ctx.session.conversation).length === 0
+                session.conversation !== undefined &&
+                Object.keys(session.conversation).length === 0
             ) {
-                delete ctx.session.conversation;
+                delete session.conversation;
             }
         }
     };
