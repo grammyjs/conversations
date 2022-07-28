@@ -11,6 +11,14 @@ export function clone<T>(arg: T) {
     // TODO: replace ugly hack with better cloning
     return arg === undefined ? undefined : JSON.parse(JSON.stringify(arg));
 }
+export function deepFreeze<T>(arg: T): T {
+    for (const prop of Object.getOwnPropertyNames(arg)) {
+        // deno-lint-ignore no-explicit-any
+        const value = (arg as any)[prop];
+        if (typeof value === "object" && value !== null) deepFreeze(value);
+    }
+    return Object.freeze(arg);
+}
 
 // Define which context properties are intrinsic to grammY or this plugin and
 // should not be stored in the op logs

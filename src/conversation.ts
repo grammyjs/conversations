@@ -12,6 +12,7 @@ import {
 } from "./deps.deno.ts";
 import {
     clone,
+    deepFreeze,
     ident,
     IS_NOT_INTRINSIC,
     type Resolver,
@@ -478,6 +479,10 @@ export class ConversationHandle<C extends Context> {
                 "Replay stack exhausted, you may not call this method!",
             );
         }
+        if (this.replayIndex.wait > 0) {
+            // Previous session won't be saved anymore so we freeze it
+            deepFreeze(this.opLog.u[this.replayIndex.wait - 1].x.session);
+        }
         const { u, x } = this.opLog.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
         // Return original context if we're about to resume execution
@@ -491,7 +496,6 @@ export class ConversationHandle<C extends Context> {
 
     _replayApi(method: string): Promise<NonNullable<ApiOp["r"]>> {
         let index = this.replayIndex.api?.get(method);
-        console.log("Read", index);
         if (index === undefined) {
             index = 0;
             this.replayIndex.api ??= new Map();
@@ -511,13 +515,7 @@ export class ConversationHandle<C extends Context> {
         if (index === undefined) this.replayIndex.ext = index = 0;
         const result = this.opLog.u[this.replayIndex.wait].e?.[index];
         this.replayIndex.ext = 1 + index;
-        if (result === undefined) {
-            console.log(
-                "Result is undefined, replay index is",
-                this.replayIndex,
-            );
-            return new Promise<never>(() => {});
-        }
+        if (result === undefined) return new Promise<never>(() => {});
         return this._resolveAt(result.i, result.r);
     }
 
