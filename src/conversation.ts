@@ -1,5 +1,4 @@
 import {
-    type Api,
     type ApiResponse,
     Context,
     type Filter,
@@ -10,9 +9,14 @@ import {
     type SessionFlavor,
     type Update,
     type User,
-    type UserFromGetMe,
 } from "./deps.deno.ts";
-import { ident, IS_NOT_INTRINSIC, type Resolver, resolver } from "./utils.ts";
+import {
+    clone,
+    ident,
+    IS_NOT_INTRINSIC,
+    type Resolver,
+    resolver,
+} from "./utils.ts";
 
 /**
  * A user-defined builder function that can be turned into middleware for a
@@ -68,7 +72,11 @@ class ConversationControls {
         );
     }
 
-    /** Enters a conversation with the given identifier */
+    /**
+     * Enters a conversation with the given identifier.
+     *
+     * Note that this method is async. You must `await` this method.
+     */
     public enter(id: string, _opts: {
         /**
          * Specify `true` if all running conversations in the same chat should
@@ -76,6 +84,9 @@ class ConversationControls {
          */
         overwrite?: boolean;
     } = {}): Promise<void> {
+        // Each installed conversation will wrap this function and intercept the
+        // call chain for their own identifier, so if we are actually called, an
+        // unknown identifier was passed. Hence, we simply throw an error.
         const known = Array.from(this[internal].ids.values())
             .map((id) => `'${id}'`)
             .join(", ");
@@ -88,6 +99,8 @@ class ConversationControls {
      * Kills all conversations with the given identifier (if any) and enters a
      * new conversation for this identifier. Equivalent to passing `overwrite:
      * true` to `enter`.
+     *
+     * Note that this method is async. You must `await` this method.
      */
     public reenter(id: string) {
         this.enter(id, { overwrite: true });
@@ -116,9 +129,9 @@ class ConversationControls {
     }
 }
 
-/** Data which the conversation plugin adds to `ctx.session` */
+/** Data which the conversations plugin adds to `ctx.session` */
 interface ConversationSessionData {
-    /** Internal data used by the conversation plugin. Do not modify. */
+    /** Internal data used by the conversations plugin. Do not modify. */
     conversation?: Record<string, ActiveConversation[]>;
 }
 interface ActiveConversation {
@@ -128,34 +141,53 @@ interface ActiveConversation {
      */
     log: OpLog;
 }
+/**
+ * Describes a log entry that does not only know its chronological position in
+ * the log which indicates in what order the op was created, but also stores the
+ * index at which the operation resolved. This makes it possible to accurately
+ * track concurrent operations and deterministically replay the order in which
+ * they resolved.
+ */
+interface AsyncOrder {
+    /** Index used to determine the op resolve order */
+    i: number;
+}
 /** Log of operations */
 interface OpLog {
-    entries: OpLogEntry[];
-}
-interface OpLogEntry {
-    op: WaitOp | ApiOp | ExtOp;
+    /** Strictly ordered log of incoming updates */
+    u: WaitOp[];
 }
 /** A `wait` call that was recorded onto the log */
 interface WaitOp {
-    type: "wait";
-    update: Update;
+    /** Incoming update object used to recreate the context */
+    u: Update;
     /**
      * All enumerable properties on the context object which should be persisted
      * in the session and restored when replaying. Excludes intrinsic
      * properties.
      */
-    extra: Record<string, unknown>;
+    x: Record<string, unknown>;
+    /** Method-keyed log of async-ordered API call results */
+    a?: Record<string, ApiOp[]>;
+    /** Log of async-ordered external operation results */
+    e?: ExtOp[];
 }
 /** A Bot API call that was recorded onto the log */
-interface ApiOp {
-    type: "api";
-    response: ApiResponse<Awaited<ReturnType<RawApi[keyof RawApi]>>>;
+interface ApiOp extends AsyncOrder {
+    /** API call result, absent if the call did not complete in time */
+    r?: ApiResponse<Awaited<ReturnType<RawApi[keyof RawApi]>>>;
 }
 /** An external operation that was recorded onto the log */
-interface ExtOp {
-    type: "ext";
-    // deno-lint-ignore no-explicit-any
-    result: { ok: true; value: any } | { ok: false; error: unknown };
+interface ExtOp extends AsyncOrder {
+    /** Result of the task, absent if it did not complete in time */
+    r?: {
+        /** The operation succeeded and `v` was returned */
+        // deno-lint-ignore no-explicit-any
+        v: any;
+    } | {
+        /** The operation failed and `e` was thrown */
+        e: unknown;
+    };
 }
 
 /** Ops that can lead to intertuption of function execution */
@@ -177,18 +209,15 @@ function conversationRunner<C extends Context>(
     function receiveUpdate(log: OpLog) {
         // Need to log both update (in `update`) and all enumerable
         // properties on the context object (in `extra`).
-        const { update, session } = ctx;
-        const extra: Record<string, unknown> = {
-            // Treat ctx.session differently, skip old conversation data
-            session: Object.fromEntries(
-                Object.entries(session).filter(([k]) => k !== "conversation"),
-            ),
-        };
-        // Copy over all remaining properties (except intrinsic ones)
-        Object.keys(ctx)
-            .filter(IS_NOT_INTRINSIC)
-            .forEach((key) => extra[key] = ctx[key as keyof C]);
-        log.entries.push({ op: { type: "wait", update, extra } });
+        const extra = Object.fromEntries(
+            Object.entries(ctx)
+                // Do not copy over intrinsic properties
+                .filter(([k]) => IS_NOT_INTRINSIC(k))
+                .map(([k, v]) => [k, clone(v)]),
+        );
+        // Do not store old session data, removing a lot of unused data
+        delete extra.session.conversation;
+        log.u.push({ u: ctx.update, x: extra });
     }
 
     /**
@@ -205,11 +234,10 @@ function conversationRunner<C extends Context>(
         // Hence, we should log the current context object.
         receiveUpdate(log);
         // Now, we invoke the conversation builder function.
-        const { api, me } = ctx;
         const rsr = resolver<ResolveOps>(); // used to catch `wait` calls
-        const handle = new ConversationHandle<C>(log, api, me, rsr);
+        const handle = new ConversationHandle<C>(ctx, log, rsr);
         // Replay the initial context object manually
-        const initialContext = handle._replayOp("wait");
+        const initialContext = handle._replayWait();
         // Call the target builder function supplied by the user, but
         // don't blindly await it because when `wait` is called
         // somewhere inside, execution is aborted. The `Promise.race`
@@ -231,7 +259,7 @@ export function conversations<C extends Context>(): MiddlewareFn<
 > {
     return async (ctx, next) => {
         if (ctx.session === undefined) {
-            throw new Error("Cannot register a conversation without session!");
+            throw new Error("Cannot use conversations without session!");
         }
         ctx.conversation ??= new ConversationControls(ctx.session);
         await next();
@@ -245,7 +273,7 @@ export function conversations<C extends Context>(): MiddlewareFn<
  * about how conversation builder functions can be created.
  *
  * @param builder Conversation builder function
- * @param id Identifier of the conversation, defaults to name of the function
+ * @param id Identifier of the conversation, defaults to `builder.name`
  * @returns Middleware to be installed on the bot
  */
 export function createConversation<C extends Context>(
@@ -259,6 +287,13 @@ export function createConversation<C extends Context>(
                 "Cannot register a conversation without first installing the conversations plugin!",
             );
         }
+
+        // Add ourselves to the conversation index
+        const index = ctx.conversation[internal].ids;
+        if (index.has(id)) {
+            throw new Error(`Duplicate conversation identifier '${id}'!`);
+        }
+        index.add(id);
 
         // Define how to run a conversation builder function
         const runOnLog = conversationRunner(ctx, builder);
@@ -282,13 +317,6 @@ export function createConversation<C extends Context>(
             return op;
         }
 
-        // Add ourselves to the conversation index
-        const index = ctx.conversation[internal].ids;
-        if (index.has(id)) {
-            throw new Error(`Duplicate conversation identifier '${id}'!`);
-        }
-        index.add(id);
-
         // Register ourselves in the enter function
         const oldEnter = ctx.conversation.enter.bind(ctx.conversation);
         ctx.conversation.enter = async (enterId, opts) => {
@@ -297,7 +325,7 @@ export function createConversation<C extends Context>(
                 return;
             }
             ctx.session.conversation ??= {};
-            const entry: ActiveConversation = { log: { entries: [] } };
+            const entry: ActiveConversation = { log: { u: [] } };
             const append = [entry];
             if (opts?.overwrite) ctx.session.conversation[id] = append;
             else (ctx.session.conversation[id] ??= []).push(...append);
@@ -344,6 +372,43 @@ export function createConversation<C extends Context>(
 }
 
 /**
+ * Index of a replay operation. Used while replaying a function to where it left
+ * off after the last wait call was reached.
+ */
+interface ReplayIndex {
+    /**
+     * Index of the current wait operation.
+     *
+     * If this value equals the length of the wait op log, it means that the
+     * next wait operation is undefined so far. In other words, the conversation
+     * builder function needs to be executed normally, whithout replaying.
+     * Hence, this value can be used to check if the replay operation is still
+     * active.
+     */
+    wait: number;
+    /**
+     * For every API method in the API call log, stores the index of the next
+     * API call result.
+     */
+    api?: Map<string, number>;
+    /**
+     * Index of the next external operation that will be called.
+     */
+    ext?: number;
+    /**
+     * Index of the next operation that should resolve. Will be incremented
+     * every time an API call or an external operation completes. This allows us
+     * to accurately restore the order in which concurrent operations complete.
+     */
+    resolve?: number;
+    /**
+     * Index of all currently pending tasks. The promises are assigned to the
+     * array in an arbitrary order, and will be resolved in ascending order.
+     */
+    tasks?: Array<Resolver<unknown>>;
+}
+
+/**
  * > This should be the first parameter in your conversation builder function.
  *
  * This object gives you access to your conversation. You can think of it as a
@@ -366,29 +431,25 @@ export type Conversation<C extends Context> = ConversationHandle<C>;
  * Internally used class which acts as a conversation handle.
  */
 export class ConversationHandle<C extends Context> {
-    /**
-     * Index in the op log of the current replay operation. Points at the
-     * next empty op log index if no replay operation is in progress. Note
-     * that in the latter case, it equals the length of the op log.
-     */
-    private replayOpIndex = 0;
+    private replayIndex: ReplayIndex = { wait: 0 };
     private active = true;
 
     constructor(
+        private readonly ctx: C,
         private readonly opLog: OpLog,
-        private api: Api,
-        private me: UserFromGetMe,
-        private rsr: Resolver<ResolveOps>,
+        private readonly rsr: Resolver<ResolveOps>,
     ) {
         // We intercept Bot API calls, returning logged responses while
         // replaying, and logging the responses of performed calls otherwise.
-        api.config.use(async (prev, method, payload, signal) => {
+        ctx.api.config.use(async (prev, method, payload, signal) => {
             if (!this.active) return prev(method, payload, signal);
             // deno-lint-ignore no-explicit-any
-            if (this._isReplaying) return this._replayOp("api") as any;
-            const response = await prev(method, payload, signal);
-            this._logOp({ op: { type: "api", response: response } });
-            return response;
+            if (this._isReplaying) return this._replayApi(method) as any;
+            const slot = this._logApi(method);
+            const result = await prev(method, payload, signal);
+            slot.r = result;
+            this._finalize(slot);
+            return result;
         });
     }
 
@@ -403,62 +464,99 @@ export class ConversationHandle<C extends Context> {
      * what you are doing. Most likely, you should not use this at all.
      */
     get _isReplaying() {
-        return this.replayOpIndex < this.opLog.entries.length;
+        return this.replayIndex.wait < this.opLog.u.length;
     }
     /**
-     * Internal method, retrieves the next logged operation from the stack while
-     * replaying, and advances the replay cursor. Relying on this can
-     * lead to very funky things, so only use this flag if you absolutely know
-     * what you are doing. Most likely, you should not use this at all.
+     * Internal method, retrieves the next logged wait operation from the stack
+     * while replaying, and advances the replay cursor. Relying on this can lead
+     * to very funky things, so only use this flag if you absolutely know what
+     * you are doing. Most likely, you should not use this at all.
      */
-    _replayOp(expectedType: "wait"): C;
-    _replayOp(expectedType: "api"): ApiOp["response"];
-    _replayOp(expectedType: "ext"): ExtOp["result"];
-    _replayOp(expectedType: OpLogEntry["op"]["type"]) {
+    _replayWait(): C {
         if (!this._isReplaying) {
             throw new Error(
                 "Replay stack exhausted, you may not call this method!",
             );
         }
-        const { op } = this.opLog.entries[this.replayOpIndex];
-        if (op.type !== expectedType) {
-            throw new Error(
-                `Unexpected operation performed during replay (expected '${op.type}' \
-but was '${expectedType}')! It looks like the conversation builder function is \
-non-deterministic, or it relies on external data sources.`,
+        const { u, x } = this.opLog.u[this.replayIndex.wait];
+        this.replayIndex = { wait: 1 + this.replayIndex.wait };
+        // Return original context if we're about to resume execution
+        if (!this._isReplaying) return this.ctx;
+        // Create fake context, and restore all enumerable properties
+        return Object.assign(
+            new Context(u, this.ctx.api, this.ctx.me),
+            x,
+        ) as C;
+    }
+
+    _replayApi(method: string): Promise<NonNullable<ApiOp["r"]>> {
+        let index = this.replayIndex.api?.get(method);
+        console.log("Read", index);
+        if (index === undefined) {
+            index = 0;
+            this.replayIndex.api ??= new Map();
+            this.replayIndex.api.set(method, index);
+        }
+        const result =
+            this.opLog.u[this.replayIndex.wait - 1].a?.[method][index];
+        this.replayIndex.api?.set(method, 1 + index);
+        if (result === undefined) {
+            return new Promise<never>(() => {});
+        }
+        return this._resolveAt(result.i, result.r);
+    }
+
+    _replayExt(): Promise<NonNullable<ExtOp["r"]>> {
+        let index = this.replayIndex.ext;
+        if (index === undefined) this.replayIndex.ext = index = 0;
+        const result = this.opLog.u[this.replayIndex.wait].e?.[index];
+        this.replayIndex.ext = 1 + index;
+        if (result === undefined) {
+            console.log(
+                "Result is undefined, replay index is",
+                this.replayIndex,
             );
+            return new Promise<never>(() => {});
         }
-        this.replayOpIndex++;
-        switch (op.type) {
-            case "wait":
-                // Create fake context, and restore all enumerable properties
-                return Object.assign(
-                    new Context(op.update, this.api, this.me),
-                    op.extra,
-                ) as C;
-            case "api":
-                return op.response;
-            case "ext":
-                return op.result;
-        }
+        return this._resolveAt(result.i, result.r);
     }
-    /**
-     * Internal function which will be called to log new operations. Relying on
-     * this can lead to very funky things, so only use this flag if you
-     * absolutely know what you are doing. Most likely, you should not use this
-     * at all.
-     *
-     * @param op Operation log entry
-     */
-    _logOp(op: OpLogEntry) {
-        if (!this._isReplaying) this.replayOpIndex++;
-        this.opLog.entries.push(op);
+
+    _logWait(op: WaitOp) {
+        if (!this._isReplaying) this.replayIndex.wait++;
+        this.opLog.u.push(op);
     }
-    _unlogOp() {
-        const op = this.opLog.entries.pop();
+    _unlogWait() {
+        const op = this.opLog.u.pop();
         if (op === undefined) throw new Error("Empty log, cannot unlog!");
-        if (!this._isReplaying) this.replayOpIndex--;
+        if (!this._isReplaying) this.replayIndex.wait--;
         return op;
+    }
+    _logApi(method: string): ApiOp {
+        const index = this.replayIndex.wait;
+        const slot = { i: -1 };
+        ((this.opLog.u[index - 1].a ??= {})[method] ??= []).push(slot);
+        return slot;
+    }
+    _logExt(): ExtOp {
+        const index = this.replayIndex.wait;
+        const slot = { i: -1 };
+        (this.opLog.u[index - 1].e ??= []).push(slot);
+        return slot;
+    }
+    _finalize(slot: AsyncOrder) {
+        slot.i = this.replayIndex.resolve ??= 0;
+        this.replayIndex.resolve++;
+    }
+    _resolveAt<T>(index: number, value?: T): Promise<T> {
+        const r = resolver(value);
+        if (index < 0) return r.promise;
+        this.replayIndex.resolve ??= 0;
+        (this.replayIndex.tasks ??= [])[index] = r;
+        while (this.replayIndex.tasks[this.replayIndex.resolve] !== undefined) {
+            this.replayIndex.tasks[this.replayIndex.resolve].resolve();
+            this.replayIndex.resolve++;
+        }
+        return r.promise;
     }
 
     /**
@@ -468,7 +566,7 @@ non-deterministic, or it relies on external data sources.`,
      */
     async wait(): Promise<C> {
         // If this is an old wait, simply return the old context object
-        if (this._isReplaying) return this._replayOp("wait");
+        if (this._isReplaying) return this._replayWait();
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
         this.rsr.resolve("wait");
@@ -530,14 +628,11 @@ non-deterministic, or it relies on external data sources.`,
      * unsend messages that you sent between calling `wait` and calling `skip`.
      */
     async skip() {
-        // We decided not to handle this update, so we purge all log entries
-        // until the most recent wait entry inclusively from the log, before
-        // passing on the control flow
-        const log = this.opLog.entries;
-        let reachedWait = false;
-        do {
-            reachedWait = this._unlogOp().op.type === "wait";
-        } while (!reachedWait && log.length > 0);
+        // We decided not to handle this update, so we purge the last wait
+        // operation again. It also contains the log of all operations performed
+        // since that wait. Hence, we effectively completely rewind the
+        // conversation until before the update was received.
+        this._unlogWait();
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
         this.rsr.resolve("skip");
@@ -592,20 +687,23 @@ non-deterministic, or it relies on external data sources.`,
         } = op;
         // Return the old result if we are replaying
         if (this._isReplaying) {
-            const result = this._replayOp("ext");
-            if (result.ok) return await afterLoad(result.value);
-            else throw await afterLoadError(result.error);
+            const result = await this._replayExt();
+            if ("v" in result) return await afterLoad(result.v);
+            else throw await afterLoadError(result.e);
         }
         // Otherwise, execute the task and log its result
+        const slot = this._logExt();
         try {
             const result = await task(...args);
             const value = await beforeStore(result);
-            this._logOp({ op: { type: "ext", result: { ok: true, value } } });
+            slot.r = { v: value };
             return result;
-        } catch (value) {
-            const error = await beforeStoreError(value);
-            this._logOp({ op: { type: "ext", result: { ok: false, error } } });
-            throw value;
+        } catch (error) {
+            const value = await beforeStoreError(error);
+            slot.r = { e: value };
+            throw error;
+        } finally {
+            this._finalize(slot);
         }
     }
     /**
