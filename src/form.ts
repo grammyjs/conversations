@@ -1,7 +1,6 @@
 import { type Context } from "./deps.deno.ts";
 
-export type ConversationForm<C extends Context> = Form<C>;
-export class Form<C extends Context> {
+export class ConversationForm<C extends Context> {
     constructor(
         private readonly conversation: {
             wait: () => Promise<C>;
