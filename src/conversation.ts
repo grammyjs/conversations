@@ -3,6 +3,7 @@ import {
     Context,
     type Filter,
     type FilterQuery,
+    type LazySessionFlavor,
     matchFilter,
     type MiddlewareFn,
     type RawApi,
@@ -34,7 +35,10 @@ type ConversationBuilder<C extends Context> = (
  */
 export type ConversationFlavor =
     & { conversation: ConversationControls }
-    & SessionFlavor<ConversationSessionData>;
+    & (
+        | SessionFlavor<ConversationSessionData>
+        | LazySessionFlavor<ConversationSessionData>
+    );
 
 interface Internals {
     /** Known conversation identifiers, used for collision checking */
@@ -56,7 +60,7 @@ class ConversationControls {
     readonly [internal]: Internals = { ids: new Set() };
 
     constructor(
-        private readonly session: ConversationSessionData | undefined,
+        private readonly session: () => Promise<ConversationSessionData>,
     ) {}
 
     /**
@@ -66,9 +70,9 @@ class ConversationControls {
      * there are any active conversations in this chat with the identifier
      * `"captcha"`.
      */
-    get active() {
+    async active() {
         return Object.fromEntries(
-            Object.entries(this.session?.conversation ?? {})
+            Object.entries((await this.session()).conversation ?? {})
                 .map(([id, conversations]) => [id, conversations.length]),
         );
     }
@@ -103,8 +107,8 @@ class ConversationControls {
      *
      * Note that this method is async. You must `await` this method.
      */
-    public reenter(id: string) {
-        this.enter(id, { overwrite: true });
+    public async reenter(id: string) {
+        await this.enter(id, { overwrite: true });
     }
 
     /**
@@ -115,17 +119,19 @@ class ConversationControls {
      * If no identifier is specified, all running conversations of all
      * identifiers will be killed.
      */
-    public exit(id?: string) {
-        const s = this.session;
-        if (s?.conversation === undefined) return;
+    public async exit(id?: string) {
+        const session = await this.session();
+        if (session.conversation === undefined) return;
         if (id === undefined) {
             // Simply clear all conversation data
-            delete s.conversation;
+            delete session.conversation;
         } else {
             // Strip out specified conversations from active ones
-            delete s.conversation[id];
-            // Do not store empty array
-            if (Object.keys(s.conversation).length === 0) delete s.conversation;
+            delete session.conversation[id];
+            // Do not store empty object
+            if (Object.keys(session.conversation).length === 0) {
+                delete session.conversation;
+            }
         }
     }
 }
@@ -137,8 +143,8 @@ interface ConversationSessionData {
 }
 interface ActiveConversation {
     /**
-     * Log of operations that were performed so far in the conversation.
-     * Used to replay past operations when resuming.
+     * Log of operations that were performed so far in the conversation. Used to
+     * replay past operations when resuming.
      */
     log: OpLog;
 }
@@ -208,8 +214,8 @@ function conversationRunner<C extends Context>(
      * replayed
      */
     function receiveUpdate(log: OpLog) {
-        // Need to log both update (in `update`) and all enumerable
-        // properties on the context object (in `extra`).
+        // Need to log both update (in `update`) and all enumerable properties
+        // on the context object (in `extra`).
         const extra = Object.fromEntries(
             Object.entries(ctx)
                 // Do not copy over intrinsic properties
@@ -239,11 +245,10 @@ function conversationRunner<C extends Context>(
         const handle = new ConversationHandle<C>(ctx, log, rsr);
         // Replay the initial context object manually
         const initialContext = handle._replayWait();
-        // Call the target builder function supplied by the user, but
-        // don't blindly await it because when `wait` is called
-        // somewhere inside, execution is aborted. The `Promise.race`
-        // intercepts this again and allows us to resume normal
-        // middleware handling.
+        // Call the target builder function supplied by the user, but don't
+        // blindly await it because when `wait` is called somewhere inside,
+        // execution is aborted. The `Promise.race` intercepts this again and
+        // allows us to resume normal middleware handling.
         try {
             await Promise.race([rsr.promise, builder(handle, initialContext)]);
         } finally {
@@ -255,14 +260,45 @@ function conversationRunner<C extends Context>(
     return run;
 }
 
+/**
+ * Main installer of the conversations plugin. Call this function and pass the
+ * result to `bot.use`:
+ *
+ * ```ts
+ * bot.use(conversations());
+ * ```
+ *
+ * This registers the control panel for conversations which is available through
+ * `ctx.conversation`. After installing this plugin, you are already able to
+ * exit conversations, even before registering them.
+ *
+ * Moreover, this function is the prerequisite for being able to register the
+ * actual conversations which can in turn be entered.
+ *
+ * ```ts
+ * function settings(conversation: MyConversation, ctx: MyContext) {
+ *     // define your conversation here
+ * }
+ * bot.use(createConversation(settings));
+ * bot.command("settings", async (ctx) => {
+ *     await ctx.conversation.enter("settings");
+ * });
+ * ```
+ *
+ * Check out the [documentation](https://grammy.dev/plugins/conversations.html)
+ * to learn more about how to create conversations.
+ */
 export function conversations<C extends Context>(): MiddlewareFn<
     C & ConversationFlavor
 > {
     return async (ctx, next) => {
-        if (ctx.session === undefined) {
+        if (!("session" in ctx)) {
             throw new Error("Cannot use conversations without session!");
         }
-        ctx.conversation ??= new ConversationControls(ctx.session);
+        ctx.conversation ??= new ConversationControls(() =>
+            // Access session lazily
+            Promise.resolve(ctx.session)
+        );
         await next();
     };
 }
@@ -325,48 +361,50 @@ export function createConversation<C extends Context>(
                 await oldEnter(enterId, opts);
                 return;
             }
-            ctx.session.conversation ??= {};
+            const session = await ctx.session;
+            session.conversation ??= {};
             const entry: ActiveConversation = { log: { u: [] } };
             const append = [entry];
-            if (opts?.overwrite) ctx.session.conversation[id] = append;
-            else (ctx.session.conversation[id] ??= []).push(...append);
-            const pos = ctx.session.conversation[id].length - 1;
+            if (opts?.overwrite) session.conversation[id] = append;
+            else (session.conversation[id] ??= []).push(...append);
+            const pos = session.conversation[id].length - 1;
             try {
                 await runUntilComplete(append);
             } finally {
                 if (append.length === 0) {
-                    ctx.session.conversation[id].splice(pos, 1);
+                    session.conversation[id].splice(pos, 1);
                 }
-                if (ctx.session.conversation[id].length === 0) {
-                    delete ctx.session.conversation[id];
+                if (session.conversation[id].length === 0) {
+                    delete session.conversation[id];
                 }
             }
         };
 
+        const session = await ctx.session;
         try {
             // Run all existing conversations with our identifier
             let op: ResolveOps = "skip";
-            if (ctx.session.conversation?.[id] !== undefined) {
+            if (session.conversation?.[id] !== undefined) {
                 try {
-                    op = await runUntilComplete(ctx.session.conversation[id]);
+                    op = await runUntilComplete(session.conversation[id]);
                 } finally {
                     // Clean up if no logs remain
-                    if (ctx.session.conversation[id].length === 0) {
-                        delete ctx.session.conversation[id];
+                    if (session.conversation[id].length === 0) {
+                        delete session.conversation[id];
                     }
                 }
             }
 
-            // If all ran conversations (if any) called skip as their last op, we
-            // run the downstream middleware
+            // If all ran conversations (if any) called skip as their last op,
+            // we run the downstream middleware
             if (op === "skip") await next();
         } finally {
             // Clean up if no conversations remain
             if (
-                ctx.session.conversation !== undefined &&
-                Object.keys(ctx.session.conversation).length === 0
+                session.conversation !== undefined &&
+                Object.keys(session.conversation).length === 0
             ) {
-                delete ctx.session.conversation;
+                delete session.conversation;
             }
         }
     };
@@ -424,6 +462,16 @@ interface ReplayIndex {
  * }
  * ```
  *
+ * It may be helpful to define a type alias.
+ *
+ * ```ts
+ * type MyConversation = Conversation<MyContext>
+ *
+ * async function greet(conversation: MyConversation, ctx: MyContext) {
+ *   // define your conversation here
+ * }
+ * ```
+ *
  * Check out the [documentation](https://grammy.dev/plugins/conversations.html)
  * to learn more about how to create conversations.
  */
@@ -454,24 +502,25 @@ export class ConversationHandle<C extends Context> {
         });
     }
 
+    /**
+     * Internal method, deactivates the conversation handle. Do not use unless
+     * you know exactly what you are doing.
+     */
     _deactivate() {
         this.active = false;
     }
 
     /**
      * Internal flag, `true` if the conversation is currently replaying in order
-     * to jump back to an old state, and `false` otherwise. Relying on this can
-     * lead to very funky things, so only use this flag if you absolutely know
-     * what you are doing. Most likely, you should not use this at all.
+     * to jump back to an old state, and `false` otherwise. Do not use unless
+     * you know exactly what you are doing.
      */
     get _isReplaying() {
         return this.replayIndex.wait < this.opLog.u.length;
     }
     /**
-     * Internal method, retrieves the next logged wait operation from the stack
-     * while replaying, and advances the replay cursor. Relying on this can lead
-     * to very funky things, so only use this flag if you absolutely know what
-     * you are doing. Most likely, you should not use this at all.
+     * Internal method, replays a wait operation and advances the replay cursor.
+     * Do not use unless you know exactly what you are doing.
      */
     _replayWait(): C {
         if (!this._isReplaying) {
@@ -494,6 +543,10 @@ export class ConversationHandle<C extends Context> {
         ) as C;
     }
 
+    /**
+     * Internal method, replays an API call operation and advances the replay
+     * cursor. Do not use unless you know exactly what you are doing.
+     */
     _replayApi(method: string): Promise<NonNullable<ApiOp["r"]>> {
         let index = this.replayIndex.api?.get(method);
         if (index === undefined) {
@@ -510,6 +563,10 @@ export class ConversationHandle<C extends Context> {
         return this._resolveAt(result.i, result.r);
     }
 
+    /**
+     * Internal method, replays an external operation and advances the replay
+     * cursor. Do not use unless you know exactly what you are doing.
+     */
     _replayExt(): Promise<NonNullable<ExtOp["r"]>> {
         let index = this.replayIndex.ext;
         if (index === undefined) this.replayIndex.ext = index = 0;
@@ -518,33 +575,58 @@ export class ConversationHandle<C extends Context> {
         if (result === undefined) return new Promise<never>(() => {});
         return this._resolveAt(result.i, result.r);
     }
-
+    /**
+     * Internal method, logs a wait call. Do not use unless you know exactly
+     * what you are doing.
+     */
     _logWait(op: WaitOp) {
         if (!this._isReplaying) this.replayIndex.wait++;
         this.opLog.u.push(op);
     }
+    /**
+     * Internal method, unlogs the most recent call. Do not use unless you know
+     * exactly what you are doing.
+     */
     _unlogWait() {
         const op = this.opLog.u.pop();
         if (op === undefined) throw new Error("Empty log, cannot unlog!");
         if (!this._isReplaying) this.replayIndex.wait--;
         return op;
     }
+    /**
+     * Internal method, logs an API call and returns the assigned slot. Do not
+     * use unless you know exactly what you are doing.
+     */
     _logApi(method: string): ApiOp {
         const index = this.replayIndex.wait;
         const slot = { i: -1 };
         ((this.opLog.u[index - 1].a ??= {})[method] ??= []).push(slot);
         return slot;
     }
+    /**
+     * Internal method, logs an external operation and returns the assigned
+     * slot. Do not use unless you know exactly what you are doing.
+     */
     _logExt(): ExtOp {
         const index = this.replayIndex.wait;
         const slot = { i: -1 };
         (this.opLog.u[index - 1].e ??= []).push(slot);
         return slot;
     }
+    /**
+     * Internal method, finalizes a previously generated slot. Do not use unless
+     * you know exactly what you are doing.
+     */
     _finalize(slot: AsyncOrder) {
         slot.i = this.replayIndex.resolve ??= 0;
         this.replayIndex.resolve++;
     }
+    /**
+     * Internal method, creates a promise from a given value that will resolve
+     * at the given index in order to accurately restore the order in which
+     * different operations complete. Do not use unless you know exactly what
+     * you are doing.
+     */
     _resolveAt<T>(index: number, value?: T): Promise<T> {
         const r = resolver(value);
         if (index < 0) return r.promise;
@@ -574,6 +656,14 @@ export class ConversationHandle<C extends Context> {
         return 0 as any; // dead code
     }
 
+    /**
+     * Waits for a new update (e.g. a message, callback query, etc)  that
+     * fulfils a certain condition. This condition is specified via the given
+     * predicate function. As soon as an update arrives for which the predicate
+     * function returns `true`, this method will return it.
+     *
+     * @param predicate Condition to fulfil
+     */
     async waitUntil<D extends C>(
         predicate: (ctx: C) => ctx is D,
     ): Promise<D>;
@@ -588,12 +678,27 @@ export class ConversationHandle<C extends Context> {
         return ctx;
     }
 
+    /**
+     * Waits for a new update (e.g. a message, callback query, etc) that does
+     * not fulfil a certain condition. This condition is specified via the given
+     * predicate function. As soon as an update arrives for which the predicate
+     * function returns `false`, this method will return it.
+     *
+     * @param predicate Condition not to fulfil
+     */
     async waitUnless(
         predicate: (ctx: C) => boolean | Promise<boolean>,
     ): Promise<C> {
         return await this.waitUntil(async (ctx) => !await predicate(ctx));
     }
 
+    /**
+     * Waits for a new update (e.g. a message, callback query, etc) that matches
+     * the given filter query. As soon as an update arrives that matches the
+     * filter query, the corresponding context object is returned.
+     *
+     * @param query The filter query to check
+     */
     async waitFor<Q extends FilterQuery>(
         query: Q | Q[],
     ): Promise<Filter<C, Q>> {
@@ -601,6 +706,13 @@ export class ConversationHandle<C extends Context> {
         return await this.waitUntil(predicate);
     }
 
+    /**
+     * Waits for a new update (e.g. a message, callback query, etc) from the
+     * given user. As soon as an update arrives from this user, the
+     * corresponding context object is returned.
+     *
+     * @param query The filter query to check
+     */
     async waitFrom(user: number | User): Promise<C & { from: User }> {
         const id = typeof user === "number" ? user : user.id;
         const predicate = (ctx: C): ctx is C & { from: User } =>
@@ -616,14 +728,14 @@ export class ConversationHandle<C extends Context> {
      * Skips handling the update that was received in the last `wait` call. Once
      * called, the conversation resets to the last `wait` call, as if the update
      * had never been received. The control flow is passed on immediately, so
-     * that downstream middleware can continue handling the update.
+     * that middleware downstream of the conversation can continue handling the
+     * update.
      *
      * Effectively, calling `await conversation.skip()` behaves as if this
      * conversation had not received the update at all.
      *
-     * Make sure not to perform any actions between the last wait call and the
-     * skip call. While the conversation rewinds its log internally, it does not
-     * unsend messages that you sent between calling `wait` and calling `skip`.
+     * While the conversation rewinds its logs internally, it does not unsend
+     * messages that you send between the calls to `wait` and `skip`.
      */
     async skip() {
         // We decided not to handle this update, so we purge the last wait
