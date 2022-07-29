@@ -631,12 +631,19 @@ export class ConversationHandle<C extends Context> {
     _resolveAt<T>(index: number, value?: T): Promise<T> {
         const r = resolver(value);
         if (index < 0) return r.promise;
-        this.replayIndex.resolve ??= 0;
         (this.replayIndex.tasks ??= [])[index] = r;
-        while (this.replayIndex.tasks[this.replayIndex.resolve] !== undefined) {
-            this.replayIndex.tasks[this.replayIndex.resolve].resolve();
-            this.replayIndex.resolve++;
-        }
+        const resolveNext = () => {
+            if (this.replayIndex.tasks === undefined) return;
+            this.replayIndex.resolve ??= 0;
+            if (
+                this.replayIndex.tasks[this.replayIndex.resolve] !== undefined
+            ) {
+                this.replayIndex.tasks[this.replayIndex.resolve].resolve();
+                this.replayIndex.resolve++;
+                setTimeout(resolveNext, 0);
+            }
+        };
+        setTimeout(resolveNext, 0);
         return r.promise;
     }
 

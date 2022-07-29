@@ -40,6 +40,8 @@ export class ConversationForm<C extends Context> {
         return text;
     }
 
+    // TODO: add match which returns `ctx.match` after `ctx.hasMatch`
+
     /**
      * Waits until the user sends a number, and returns this number. If the user
      * sends something that cannot be parsed to a number using `parseFloat`,
