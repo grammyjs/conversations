@@ -743,6 +743,10 @@ export class ConversationHandle<C extends Context> {
     // TODO: implement hears matching
     // TODO: implement callback, game, and inline query matching
 
+    /**
+     * Utilities for building forms. Contains methods that let you wait for
+     * messages and automatically perform input validation.
+     */
     form = new ConversationForm(this);
 
     /**

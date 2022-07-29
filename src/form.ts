@@ -1,6 +1,19 @@
 import { type Context } from "./deps.deno.ts";
 
+/**
+ * Form building utilities that are exposed on `conversation.form`.
+ *
+ * All methods of this class behave similarly. They all follow these steps:
+ * 1. Wait for an update.
+ * 2. Validate the contained data.
+ * 3. Skip the update if validation fails.
+ * 4. Extract the data if the validation succeeds, and return the data.
+ *
+ * Moreover, you are able to pass a handler to each method that will be called
+ * if the user sends an update that fails validation.
+ */
 export class ConversationForm<C extends Context> {
+    /** This class is constructed internally by the plugin. */
     constructor(
         private readonly conversation: {
             wait: () => Promise<C>;
