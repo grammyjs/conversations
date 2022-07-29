@@ -11,7 +11,7 @@ import {
     type Update,
     type User,
 } from "./deps.deno.ts";
-import { Form } from "./form.ts";
+import { type ConversationForm, Form } from "./form.ts";
 import {
     clone,
     deepFreeze,
@@ -743,7 +743,7 @@ export class ConversationHandle<C extends Context> {
     // TODO: implement hears matching
     // TODO: implement callback, game, and inline query matching
 
-    form = new Form(this);
+    form: ConversationForm<C> = new Form(this);
 
     /**
      * Skips handling the update that was received in the last `wait` call. Once

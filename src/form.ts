@@ -9,6 +9,15 @@ export class Form<C extends Context> {
         },
     ) {}
 
+    /**
+     * Waits until the user sends some text, and returns this text. If the user
+     * does something else, these updates will be skipped. You may specify the
+     * `otherwise` handler that is called in such cases. Among other things,
+     * this allows you to tell the user that they need to send some text.
+     *
+     * @param otherwise Handler that will be run for skipped updates
+     * @returns The received text
+     */
     async text(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
         const ctx = await this.conversation.wait();
         const text = ctx.msg?.text ?? ctx.msg?.caption;
@@ -19,6 +28,16 @@ export class Form<C extends Context> {
         return text;
     }
 
+    /**
+     * Waits until the user sends a number, and returns this number. If the user
+     * sends something that cannot be parsed to a number using `parseFloat`,
+     * these updates will be skipped. You may specify the `otherwise` handler
+     * that is called in such cases. Among other things, this allows you to tell
+     * the user that they need to send some text.
+     *
+     * @param otherwise Handler that will be run for skipped updates
+     * @returns The received number
+     */
     async number(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
         const ctx = await this.conversation.wait();
         const num = parseFloat(ctx.msg?.text ?? ctx.msg?.caption ?? "NaN");
@@ -29,6 +48,17 @@ export class Form<C extends Context> {
         return num;
     }
 
+    /**
+     * Waits until the user sends a number, and returns this number. If the user
+     * sends something that cannot be parsed to a number using `parseInt`, these
+     * updates will be skipped. You may specify the `otherwise` handler that is
+     * called in such cases. Among other things, this allows you to tell the
+     * user that they need to send some text. You can also pass a radix that
+     * will be passed to `parseInt`.
+     *
+     * @param options Options for radix and otherwise handler
+     * @returns The received number
+     */
     async int(
         options:
             | number
@@ -36,13 +66,14 @@ export class Form<C extends Context> {
             | {
                 radix?: number;
                 otherwise?: (ctx: C) => Promise<unknown> | unknown;
-            },
+            } = {},
     ) {
-        const { otherwise, radix } = typeof options === "number"
-            ? { radix: options, otherwise: undefined }
-            : typeof options === "function"
-            ? { radix: undefined, otherwise: options }
-            : options;
+        const { otherwise = undefined, radix = undefined } =
+            typeof options === "number"
+                ? { radix: options }
+                : typeof options === "function"
+                ? { otherwise: options }
+                : options;
         const ctx = await this.conversation.wait();
         const text = ctx.msg?.text ?? ctx.msg?.caption ?? "NaN";
         const num = parseInt(text, radix);
@@ -53,6 +84,18 @@ export class Form<C extends Context> {
         return num;
     }
 
+    /**
+     * Waits until the user sends one of the given strings, and returns the
+     * selected string. This is escpecially useful if you previously sent a
+     * custom keyboard, and you expect the user to press one of the keyboard
+     * buttons. If the user does something else, these updates will be skipped.
+     * You may specify the `otherwise` handler that is called in such cases.
+     * Among other things, this allows you to tell the user that they need to
+     * select one of the given options.
+     *
+     * @param otherwise Handler that will be run for invalid updates
+     * @returns The selected text
+     */
     async select<T extends string>(
         options: T[],
         otherwise: (ctx: C) => Promise<unknown> | unknown,
