@@ -5,7 +5,10 @@
 > **WARNING: unstable.** This is not completely stable yet. Please try it out and provide feedback, either by opening an issue or in the [group chat](https://t.me/grammyjs).
 > You can also [look at a preview of the docs](https://github.com/grammyjs/website/pull/331).
 
-Here is an example for both Deno and Node of how you can use this package. It mainly exports `Conversation`, `ConversationFlavor`, and `createConversation`.
+Here is an example for both Deno and Node of how you can use this package. Besides the main plugin function `conversation`, it exports `createConversation` for registering conversations.
+Also, it will give you the types `Conversation`, and `ConversationFlavor`.
+
+The API reference is at <https://doc.deno.land/https://deno.land/x/grammy_conversations/mod.ts>.
 
 ## Deno
 
