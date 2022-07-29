@@ -3,6 +3,23 @@ export function ident<T>(arg: T) {
     return arg;
 }
 
+/**
+ * Performs a structured clone, ignoring non-enumerable properties such as
+ * functions.
+ */
+export function clone<T>(arg: T) {
+    // TODO: replace ugly hack with better cloning
+    return arg === undefined ? undefined : JSON.parse(JSON.stringify(arg));
+}
+export function deepFreeze<T>(arg: T): T {
+    for (const prop of Object.getOwnPropertyNames(arg)) {
+        // deno-lint-ignore no-explicit-any
+        const value = (arg as any)[prop];
+        if (typeof value === "object" && value !== null) deepFreeze(value);
+    }
+    return Object.freeze(arg);
+}
+
 // Define which context properties are intrinsic to grammY or this plugin and
 // should not be stored in the op logs
 const INTRINSIC_CONTEXT_PROPS = new Set([
@@ -10,7 +27,6 @@ const INTRINSIC_CONTEXT_PROPS = new Set([
     "api",
     "me",
     "conversation",
-    "session",
 ]);
 export function IS_NOT_INTRINSIC(key: string) {
     return !INTRINSIC_CONTEXT_PROPS.has(key);
@@ -30,7 +46,7 @@ export interface Resolver<T> {
     /** Value of the promise, if is it resolved, and undefined otherwise */
     value?: T;
     /** Resolves the promise of this resolver */
-    resolve(t: T): void;
+    resolve(t?: T): void;
     /**
      * A flag indicating whether `resolve` has been called, i.e. whether the
      * promise has been resolved. Has the value `true` until `resolve` is
@@ -39,10 +55,11 @@ export interface Resolver<T> {
     isResolved(): this is { value: T };
 }
 /** Creates a new resolver */
-export function resolver<T>(): Resolver<T> {
-    const rsr = { isResolved: () => false } as Resolver<T>;
+export function resolver<T>(value?: T): Resolver<T> {
+    const rsr = { value, isResolved: () => false } as Resolver<T>;
     rsr.promise = new Promise((resolve) => {
-        rsr.resolve = (t: T) => {
+        rsr.resolve = (t = value) => {
+            if (t === undefined) throw new Error("No resolve value given!");
             rsr.isResolved = () => true;
             rsr.value = t;
             resolve(t);
