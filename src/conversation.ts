@@ -11,6 +11,7 @@ import {
     type Update,
     type User,
 } from "./deps.deno.ts";
+import { Form } from "./form.ts";
 import {
     clone,
     deepFreeze,
@@ -663,18 +664,25 @@ export class ConversationHandle<C extends Context> {
      * function returns `true`, this method will return it.
      *
      * @param predicate Condition to fulfil
+     * @param otherwise Optional handler for discarded updates
      */
     async waitUntil<D extends C>(
         predicate: (ctx: C) => ctx is D,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
     ): Promise<D>;
     async waitUntil(
         predicate: (ctx: C) => boolean | Promise<boolean>,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
     ): Promise<C>;
     async waitUntil(
         predicate: (ctx: C) => boolean | Promise<boolean>,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
     ): Promise<C> {
         const ctx = await this.wait();
-        if (!await predicate(ctx)) await this.skip();
+        if (!await predicate(ctx)) {
+            await otherwise?.(ctx);
+            await this.skip();
+        }
         return ctx;
     }
 
@@ -685,11 +693,16 @@ export class ConversationHandle<C extends Context> {
      * function returns `false`, this method will return it.
      *
      * @param predicate Condition not to fulfil
+     * @param otherwise Optional handler for discarded updates
      */
     async waitUnless(
         predicate: (ctx: C) => boolean | Promise<boolean>,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
     ): Promise<C> {
-        return await this.waitUntil(async (ctx) => !await predicate(ctx));
+        return await this.waitUntil(
+            async (ctx) => !await predicate(ctx),
+            otherwise,
+        );
     }
 
     /**
@@ -698,12 +711,14 @@ export class ConversationHandle<C extends Context> {
      * filter query, the corresponding context object is returned.
      *
      * @param query The filter query to check
+     * @param otherwise Optional handler for discarded updates
      */
     async waitFor<Q extends FilterQuery>(
         query: Q | Q[],
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
     ): Promise<Filter<C, Q>> {
         const predicate: (ctx: C) => ctx is Filter<C, Q> = matchFilter(query);
-        return await this.waitUntil(predicate);
+        return await this.waitUntil(predicate, otherwise);
     }
 
     /**
@@ -711,18 +726,24 @@ export class ConversationHandle<C extends Context> {
      * given user. As soon as an update arrives from this user, the
      * corresponding context object is returned.
      *
-     * @param query The filter query to check
+     * @param user The user to wait for
+     * @param otherwise Optional handler for discarded updates
      */
-    async waitFrom(user: number | User): Promise<C & { from: User }> {
+    async waitFrom(
+        user: number | User,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+    ): Promise<C & { from: User }> {
         const id = typeof user === "number" ? user : user.id;
         const predicate = (ctx: C): ctx is C & { from: User } =>
             ctx.from?.id === id;
-        return await this.waitUntil(predicate);
+        return await this.waitUntil(predicate, otherwise);
     }
 
     // TODO: implement command matching
     // TODO: implement hears matching
     // TODO: implement callback, game, and inline query matching
+
+    form = new Form(this);
 
     /**
      * Skips handling the update that was received in the last `wait` call. Once
