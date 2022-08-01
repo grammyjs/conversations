@@ -9,7 +9,10 @@ export function ident<T>(arg: T) {
  */
 export function clone<T>(arg: T) {
     // TODO: replace ugly hack with better cloning
-    return arg === undefined ? undefined : JSON.parse(JSON.stringify(arg));
+    if (arg === undefined) return undefined;
+    const string = JSON.stringify(arg);
+    if (string === undefined) return undefined;
+    return JSON.parse(string);
 }
 export function deepFreeze<T>(arg: T): T {
     for (const prop of Object.getOwnPropertyNames(arg)) {
