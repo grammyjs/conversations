@@ -11,7 +11,7 @@ export function clone<T>(arg: T) {
     // TODO: replace ugly hack with better cloning
     if (arg === undefined) return undefined;
     const string = JSON.stringify(arg);
-    if (string === undefined) return undefined;
+    if (!string) return undefined;
     return JSON.parse(string);
 }
 export function deepFreeze<T>(arg: T): T {

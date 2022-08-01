@@ -174,6 +174,11 @@ interface WaitOp {
      * properties.
      */
     x: Record<string, unknown>;
+    /**
+     * All properties on the context object, enumerable or not, which could not
+     * be persisted and will be proxied to the alive context object.
+     */
+    f?: string[];
     /** Method-keyed log of async-ordered API call results */
     a?: Record<string, ApiOp[]>;
     /** Log of async-ordered external operation results */
@@ -216,15 +221,25 @@ function conversationRunner<C extends Context>(
     function receiveUpdate(log: OpLog) {
         // Need to log both update (in `update`) and all enumerable properties
         // on the context object (in `extra`).
+        let functions: string[] | undefined;
         const extra = Object.fromEntries(
             Object.entries(ctx)
                 // Do not copy over intrinsic properties
                 .filter(([k]) => IS_NOT_INTRINSIC(k))
-                .map(([k, v]) => [k, clone(v)]),
+                .map(([k, v]) => [k, v, clone(v)])
+                // Remember functions
+                .filter(([k, v, c]) => {
+                    if (v !== undefined && c === undefined) {
+                        (functions ??= []).push(k);
+                        return false;
+                    }
+                    return true;
+                })
+                .map(([k, , c]) => [k, c]),
         );
         // Do not store old session data, removing a lot of unused data
         delete extra.session.conversation;
-        log.u.push({ u: ctx.update, x: extra });
+        log.u.push({ u: ctx.update, x: extra, f: functions });
     }
 
     /**
@@ -532,15 +547,19 @@ export class ConversationHandle<C extends Context> {
             // Previous session won't be saved anymore so we freeze it
             deepFreeze(this.opLog.u[this.replayIndex.wait - 1].x.session);
         }
-        const { u, x } = this.opLog.u[this.replayIndex.wait];
+        const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
         // Return original context if we're about to resume execution
         if (!this._isReplaying) return this.ctx;
         // Create fake context, and restore all enumerable properties
-        return Object.assign(
+        const ctx = Object.assign(
             new Context(u, this.ctx.api, this.ctx.me),
             x,
         ) as C;
+        // Copy over functions which we could not store
+        // deno-lint-ignore no-explicit-any
+        f.forEach((p) => (ctx as any)[p] = (this.ctx as any)[p].bind(this.ctx));
+        return ctx;
     }
 
     /**
