@@ -1,7 +1,7 @@
 {
     "name": "@grammyjs/conversations",
     "description": "Conversational interfaces for grammY",
-    "version": "0.7.4",
+    "version": "1.0.0",
     "author": "KnorpelSenf",
     "license": "MIT",
     "engines": {
