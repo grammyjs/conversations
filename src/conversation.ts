@@ -4,7 +4,6 @@ import {
     type Filter,
     type FilterQuery,
     type LazySessionFlavor,
-    matchFilter,
     type MiddlewareFn,
     type RawApi,
     type SessionFlavor,
