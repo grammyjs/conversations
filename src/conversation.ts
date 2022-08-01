@@ -724,8 +724,7 @@ export class ConversationHandle<C extends Context> {
         query: Q | Q[],
         otherwise?: (ctx: C) => unknown | Promise<unknown>,
     ): Promise<Filter<C, Q>> {
-        const predicate: (ctx: C) => ctx is Filter<C, Q> = matchFilter(query);
-        return await this.waitUntil(predicate, otherwise);
+        return await this.waitUntil(Context.has.filterQuery(query), otherwise);
     }
 
     /**
