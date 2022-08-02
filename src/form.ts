@@ -112,7 +112,7 @@ export class ConversationForm<C extends Context> {
      */
     async select<T extends string>(
         options: T[],
-        otherwise: (ctx: C) => Promise<unknown> | unknown,
+        otherwise?: (ctx: C) => Promise<unknown> | unknown,
     ) {
         const opts: string[] = options;
         const ctx = await this.conversation.wait();
