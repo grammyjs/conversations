@@ -123,4 +123,29 @@ export class ConversationForm<C extends Context> {
         }
         return text as T;
     }
+        /**
+     * Waits until the user sends one of the given strings, and returns the
+     * selected string. This is escpecially useful if you previously sent a
+     * custom keyboard, and you expect the user to press one of the keyboard
+     * buttons. If the user does something else, these updates will be skipped.
+     * You may specify the `otherwise` handler that is called in such cases.
+     * Among other things, this allows you to tell the user that they need to
+     * select one of the given options.
+     *
+     * @param otherwise Handler that will be run for invalid updates
+     * @returns The selected text
+     */
+    async select<T extends string>(
+        options: T[],
+        otherwise?: (ctx: C) => Promise<unknown> | unknown,
+    ) {
+        const opts: string[] = options;
+        const ctx = await this.conversation.wait();
+        const text = ctx.msg?.text ?? ctx.msg?.caption;
+        if (text === undefined || !opts.includes(text)) {
+            await otherwise?.(ctx);
+            return await this.conversation.skip();
+        }
+        return text as T;
+    }
 }
