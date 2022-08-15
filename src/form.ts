@@ -123,28 +123,4 @@ export class ConversationForm<C extends Context> {
         }
         return text as T;
     }
-
-    /**
-     * Waits until the user sends a URL, and returns this url. If the user
-     * sends something that cannot be parsed to a url using constructor URL() ,
-     * these updates will be skipped. You may specify the `otherwise` handler
-     * that is called in such cases. Among other things, this allows you to tell
-     * the user that they need to send some text. Right now, the URL needs to include the protocol sued to be correctly verified.
-     *
-     * @param otherwise Handler that will be run for skipped updates
-     * @returns The received number
-     */
-
-    async url(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
-        const ctx = await this.conversation.wait();
-        const url = ctx.msg?.text ?? ctx.msg?.caption;
-        let text: URL;
-        try {
-            text = new URL(url);
-        } catch (_) {
-            await otherwise?.(ctx);
-            return await this.conversation.skip();
-        }
-        return text;
-    }
 }
