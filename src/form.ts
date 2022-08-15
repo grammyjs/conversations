@@ -123,29 +123,27 @@ export class ConversationForm<C extends Context> {
         }
         return text as T;
     }
-        /**
-     * Waits until the user sends one of the given strings, and returns the
-     * selected string. This is escpecially useful if you previously sent a
-     * custom keyboard, and you expect the user to press one of the keyboard
-     * buttons. If the user does something else, these updates will be skipped.
-     * You may specify the `otherwise` handler that is called in such cases.
-     * Among other things, this allows you to tell the user that they need to
-     * select one of the given options.
-     *
-     * @param otherwise Handler that will be run for invalid updates
-     * @returns The selected text
-     */
-    async select<T extends string>(
-        options: T[],
-        otherwise?: (ctx: C) => Promise<unknown> | unknown,
-    ) {
-        const opts: string[] = options;
-        const ctx = await this.conversation.wait();
-        const text = ctx.msg?.text ?? ctx.msg?.caption;
-        if (text === undefined || !opts.includes(text)) {
-            await otherwise?.(ctx);
-            return await this.conversation.skip();
-        }
-        return text as T;
-    }
+   /**
+    * Waits until the user sends a URL, and returns this url. If the user
+    * sends something that cannot be parsed to a url using constructor URL() ,
+    * these updates will be skipped. You may specify the `otherwise` handler
+    * that is called in such cases. Among other things, this allows you to tell
+    * the user that they need to send some text. Right now, the URL needs to include the protocol sued to be correctly verified.
+    *
+    * @param otherwise Handler that will be run for skipped updates
+    * @returns The received number
+    */
+   
+    async url(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
+       const ctx = await this.conversation.wait();
+       const url = ctx.msg?.text ?? ctx.msg?.caption;
+       let text:URL;
+       try {
+         text = new URL(url);
+       } catch (_) {
+         await otherwise?.(ctx);
+         return await this.conversation.skip();
+       }
+       return text;
+     }
 }
