@@ -33,8 +33,8 @@ type ConversationBuilder<C extends Context> = (
  * panel `ctx.conversation` which e.g. allows entering a conversation. It also
  * adds some properties to the session which the conversation plugin needs.
  */
-export type ConversationFlavor =
-    & { conversation: ConversationControls }
+export type ConversationFlavor<C> =
+    C & { conversation: ConversationControls }
     & (
         | SessionFlavor<ConversationSessionData>
         | LazySessionFlavor<ConversationSessionData>
@@ -210,7 +210,7 @@ type ResolveOps = "wait" | "skip" | "done";
  * builder functions based on an op log.
  */
 function conversationRunner<C extends Context>(
-    ctx: C & ConversationFlavor,
+    ctx: C & ConversationFlavor<C>,
     builder: ConversationBuilder<C>,
 ) {
     /**
@@ -304,7 +304,7 @@ function conversationRunner<C extends Context>(
  * to learn more about how to create conversations.
  */
 export function conversations<C extends Context>(): MiddlewareFn<
-    C & ConversationFlavor
+    C & ConversationFlavor<C>
 > {
     return async (ctx, next) => {
         if (!("session" in ctx)) {
@@ -331,7 +331,7 @@ export function conversations<C extends Context>(): MiddlewareFn<
 export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
     id = builder.name,
-): MiddlewareFn<C & ConversationFlavor> {
+): MiddlewareFn<C & ConversationFlavor<C>> {
     if (!id) throw new Error("Cannot register a function without name!");
     return async (ctx, next) => {
         if (ctx.conversation === undefined) {
