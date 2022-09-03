@@ -547,7 +547,9 @@ export class ConversationHandle<C extends Context> {
             // Previous session won't be saved anymore so we freeze it
             deepFreeze(this.opLog.u[this.replayIndex.wait - 1].x.session);
         }
-        const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
+        const { u, x, f: _f } = this.opLog.u[this.replayIndex.wait];
+        const f = _f ?? []
+
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
         // Use a dummy conversation control panel inside conversations
         const reject = () => {
