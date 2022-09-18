@@ -599,7 +599,7 @@ export class ConversationHandle<C extends Context> {
     _replayExt(): Promise<NonNullable<ExtOp["r"]>> {
         let index = this.replayIndex.ext;
         if (index === undefined) this.replayIndex.ext = index = 0;
-        const result = this.opLog.u[this.replayIndex.wait].e?.[index];
+        const result = this.opLog.u[this.replayIndex.wait - 1].e?.[index];
         this.replayIndex.ext = 1 + index;
         if (result === undefined) return new Promise<never>(() => {});
         return this._resolveAt(result.i, result.r);
