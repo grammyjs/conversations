@@ -81,6 +81,11 @@ class ConversationControls {
      * Enters a conversation with the given identifier.
      *
      * Note that this method is async. You must `await` this method.
+     *
+     * While it is possible to enter a conversation from within another
+     * conversation in order to start a parallel conversation, it is usually
+     * preferable to simply call the other conversation function directly:
+     * https://grammy.dev/plugins/conversations.html#functions-and-recursion
      */
     public enter(id: string, _opts: {
         /**
@@ -118,6 +123,12 @@ class ConversationControls {
      *
      * If no identifier is specified, all running conversations of all
      * identifiers will be killed.
+     *
+     * Note that if you call `exit` from within a conversation, the conversation
+     * will not terminate immediately once it reaches the `exit` call. Instead,
+     * it will continue until it reaches the next `wait` or `skip` statement,
+     * and then exit. This is another reason why it is usually easier to return
+     * or throw in order to leave a conversation.
      */
     public async exit(id?: string) {
         const session = await this.session();
