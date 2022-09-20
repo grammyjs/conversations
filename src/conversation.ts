@@ -549,22 +549,12 @@ export class ConversationHandle<C extends Context> {
         }
         const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
-        // Use a dummy conversation control panel inside conversations
-        const reject = () => {
-            const error =
-                "You cannot use `ctx.conversation` from within a conversation!";
-            return Promise.reject(new Error(error));
-        };
-        const conversation = new ConversationControls(reject);
-        conversation.enter = conversation.reenter = conversation.exit = reject;
-        const controls = { conversation };
         // Return original context if we're about to resume execution
-        if (!this._isReplaying) return Object.assign(this.ctx, controls);
+        if (!this._isReplaying) return this.ctx;
         // Create fake context, and restore all enumerable properties
         const ctx = Object.assign(
             new Context(u, this.ctx.api, this.ctx.me),
             x,
-            controls,
         ) as C;
         // Copy over functions which we could not store
         // deno-lint-ignore no-explicit-any
