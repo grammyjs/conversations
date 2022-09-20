@@ -906,6 +906,16 @@ export class ConversationHandle<C extends Context> {
         console.log(...args);
     }
     /**
+     * Safely perform `console.error` calls, but only when they should really be
+     * logged (so not during replay operations).
+     *
+     * @param args Arguments to pass to `console.error`
+     */
+    error(...args: Parameters<typeof console.error>) {
+        if (this._isReplaying) return;
+        console.error(...args);
+    }
+    /**
      * Safely gets the value of `Date.now()`. You should use this instead of
      * `Date.now()` in your conversation because the time value changes
      * continuously, which may lead to unpredictable and non-deterministic
