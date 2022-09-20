@@ -26,7 +26,7 @@ import {
  * should use to write your conversation. It can be used like so:
  *
  * ```ts
- * const myConversation: ConversationBuilder<MyContext> = (conversation, ctx) => {
+ * const myConversation: ConversationBuilder<MyContext> = async (conversation, ctx) => {
  *   // TODO define the conversation
  * }
  * ```
