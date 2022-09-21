@@ -21,7 +21,8 @@ import {
     Context,
     lazySession,
     session,
-    SessionFlavor,
+    type SessionFlavor,
+    type Update,
 } from "../src/deps.deno.ts";
 import { resolver } from "../src/utils.ts";
 import {
@@ -761,6 +762,66 @@ describe("The conversation engine", () => {
             assertEquals(log.calls.length, 1);
             assertEquals(log.calls[0].args, ["debug"]);
             log.restore();
+        });
+    });
+    describe("provides conversation.run", () => {
+        it.only("which should run middleware with the incoming context object", async () => {
+            const p: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "p" },
+            };
+            const q: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "q" },
+            };
+            const r: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "r" },
+            };
+            let seq = "";
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        await conversation.external(() => seq += "a");
+                        await conversation.wait(); // p
+                        await conversation.external(() => seq += "b");
+                        await conversation.run(async (ctx, next) => {
+                            seq += ctx.msg?.text ?? "x";
+                            seq += "1";
+                            await next();
+                            seq += "2";
+                        });
+                        await conversation.external(() => seq += "c");
+                        await conversation.wait(); // q
+                        await conversation.external(() => seq += "d");
+                        await conversation.run(async (ctx, next) => {
+                            seq += ctx.msg?.text ?? "y";
+                            seq += "3";
+                            await next();
+                            seq += "4";
+                        });
+                        await conversation.external(() => seq += "e");
+                        await conversation.run(async (ctx, next) => {
+                            seq += ctx.msg?.text ?? "z";
+                            seq += "5";
+                            await next();
+                            seq += "6";
+                        });
+                        await conversation.external(() => seq += "f");
+                        await conversation.wait(); // r
+                        await conversation.external(() => seq += "g");
+                        return 42;
+                    },
+                    [p, q, r],
+                    [],
+                    (
+                        ctx,
+                        next,
+                    ) => (seq += "|" + (ctx.msg?.text ?? "0"), next()),
+                ),
+            );
+            assertEquals(seq, "|/starta|pbp12c|qp12dq34eq56f|rp12q12q34q56g"); // read closely
         });
     });
 });
