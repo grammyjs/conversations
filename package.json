@@ -14,9 +14,6 @@
     },
     "scripts": {
         "prepare": "npm run backport",
-        "cache": "deno cache src/mod.ts",
-        "lint": "deno lint --config deno.jsonc",
-        "fmt": "deno fmt --config deno.jsonc",
         "backport": "deno2node tsconfig.json"
     },
     "dependencies": {

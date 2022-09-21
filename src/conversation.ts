@@ -229,7 +229,7 @@ function conversationRunner<C extends Context>(
      * effectively turning the most recent wait op into a old wait which will be
      * replayed
      */
-    function receiveUpdate(log: OpLog) {
+    function waitOp(): WaitOp {
         // Need to log both update (in `update`) and all enumerable properties
         // on the context object (in `extra`).
         let functions: string[] | undefined;
@@ -250,7 +250,7 @@ function conversationRunner<C extends Context>(
         );
         // Do not store old session data, removing a lot of unused data
         delete extra.session.conversation;
-        log.u.push({ u: ctx.update, x: extra, f: functions });
+        return { u: ctx.update, x: extra, f: functions };
     }
 
     /**
@@ -260,17 +260,18 @@ function conversationRunner<C extends Context>(
      * this function re-throws errors thrown by the conversation.
      */
     async function run(log: OpLog) {
+        // Create the conversation handle
+        const rsr = resolver<ResolveOps>(); // used to catch `wait` calls
+        const handle = new ConversationHandle<C>(ctx, log, rsr);
         // We are either starting the conversation builder function from
         // scratch, or we are beginning a replay operation. In both cases, the
         // current context object is new to the conversation builder function,
         // be it the inital context object or the result of a `wait` call.
-        // Hence, we should log the current context object.
-        receiveUpdate(log);
-        // Now, we invoke the conversation builder function.
-        const rsr = resolver<ResolveOps>(); // used to catch `wait` calls
-        const handle = new ConversationHandle<C>(ctx, log, rsr);
-        // Replay the initial context object manually
-        const initialContext = handle._replayWait();
+        // Hence, we should log an op with the current context object.
+        handle._logWait(waitOp()); // appends to end of log
+        // Now, we invoke the conversation builder function. We start by
+        // replaying the initial context object manually.
+        const initialContext = handle._replayWait(); // retrieves from start of log
         // Call the target builder function supplied by the user, but don't
         // blindly await it because when `wait` is called somewhere inside,
         // execution is aborted. The `Promise.race` intercepts this again and
@@ -610,7 +611,6 @@ export class ConversationHandle<C extends Context> {
      * what you are doing.
      */
     _logWait(op: WaitOp) {
-        if (!this._isReplaying) this.replayIndex.wait++;
         this.opLog.u.push(op);
     }
     /**
@@ -620,7 +620,6 @@ export class ConversationHandle<C extends Context> {
     _unlogWait() {
         const op = this.opLog.u.pop();
         if (op === undefined) throw new Error("Empty log, cannot unlog!");
-        if (!this._isReplaying) this.replayIndex.wait--;
         return op;
     }
     /**
@@ -659,7 +658,6 @@ export class ConversationHandle<C extends Context> {
      */
     _resolveAt<T>(index: number, value?: T): Promise<T> {
         const r = resolver(value);
-        if (index < 0) return r.promise;
         (this.replayIndex.tasks ??= [])[index] = r;
         const resolveNext = () => {
             if (this.replayIndex.tasks === undefined) return;
@@ -837,7 +835,7 @@ export class ConversationHandle<C extends Context> {
             /** Parameters to supply to the operation */
             args?: Parameters<F>;
             /** Prepare the result for storing */
-            beforeStore?: (value: ReturnType<F>) => I | Promise<I>;
+            beforeStore?: (value: Awaited<ReturnType<F>>) => I | Promise<I>;
             /** Recover a result after storing */
             afterLoad?: (value: I) => ReturnType<F> | Promise<ReturnType<F>>;
             /** Prepare the result for storing */

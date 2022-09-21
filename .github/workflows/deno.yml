@@ -1,0 +1,85 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+# This workflow will install Deno and run tests across stable and nightly builds on Windows, Ubuntu and macOS.
+# For more information see: https://github.com/denolib/setup-deno
+
+name: grammY conversations
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backport:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup repo
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run backporting
+        run: npm run backport
+
+  format-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup repo
+        uses: actions/checkout@v3
+
+      - uses: denoland/setup-deno@main
+        with:
+          deno-version: v1.x
+
+      - name: Check Format
+        run: deno fmt --check
+
+      - name: Lint
+        run: deno lint
+
+  test:
+    runs-on: ${{ matrix.os }} # runs a test on Ubuntu, Windows and macOS
+
+    strategy:
+      matrix:
+        os: [macOS-latest, windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Setup repo
+        uses: actions/checkout@v3
+
+      - uses: denoland/setup-deno@main
+        with:
+          deno-version: v1.x
+
+      - name: Cache Dependencies
+        run: deno cache src/mod.ts
+
+      - name: Run Tests
+        run: deno task test
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: denoland/setup-deno@main
+        with:
+          deno-version: v1.x
+
+      - name: Create coverage files
+        run: deno task coverage
+
+      - name: Collect coverage
+        uses: codecov/codecov-action@v1.0.10 # upload the report on Codecov
+        with:
+          file: ./coverage.lcov
