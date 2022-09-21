@@ -880,8 +880,7 @@ export class ConversationHandle<C extends Context> {
     async waitForReplyTo(
         message_id: number | { message_id: number },
         opts?: OtherwiseConfig<C>,
-    ) {
-        console.log("asdf");
+    ): Promise<Filter<C, "message" | "channel_post">> {
         const id = typeof message_id === "number"
             ? message_id
             : message_id.message_id;
