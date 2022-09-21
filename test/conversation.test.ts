@@ -2,6 +2,7 @@
 import { assert } from "https://deno.land/std@0.153.0/_util/assert.ts";
 import {
     assertEquals,
+    assertFalse,
     assertRejects,
     assertThrows,
 } from "https://deno.land/std@0.156.0/testing/asserts.ts";
@@ -20,6 +21,7 @@ import {
     BotError,
     Context,
     lazySession,
+    NextFunction,
     session,
     type SessionFlavor,
     type Update,
@@ -320,8 +322,8 @@ describe("The conversation engine", () => {
     });
     it("should protect against invalid wait replays", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
-        function conv(conversation: MyConversation) {
-            conversation._replayWait();
+        async function conv(conversation: MyConversation) {
+            await conversation._replayWait();
         }
         bot.use(
             session({ initial: () => ({}) }),
@@ -765,7 +767,52 @@ describe("The conversation engine", () => {
         });
     });
     describe("provides conversation.run", () => {
-        it.only("which should run middleware with the incoming context object", async () => {
+        it("which should run middleware", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation, ctx) => {
+                        await conversation.run((c) => {
+                            assertEquals(ctx, c);
+                            assertEquals(c.update, slashStart);
+                        });
+                        return 42;
+                    },
+                    [slashStart],
+                ),
+            );
+        });
+        it("which should run middleware before a wait", async () => {
+            let seq = "";
+            const mw = spy((
+                ctx: MyContext,
+                next: NextFunction,
+            ) => (seq += ctx.msg?.text ?? "m", next()));
+            const msg: Update = {
+                update_id: 10,
+                message: { message_id, chat, date, text: "t" },
+            };
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        seq += "a";
+                        await conversation.run(mw);
+                        seq += "b";
+                        await conversation.wait();
+                        seq += "c";
+                        return 42;
+                    },
+                    [msg],
+                ),
+            );
+            assertEquals(seq, "a/startba/startbtc");
+            assertEquals(mw.calls.length, 3);
+            assertEquals(mw.calls[0].args[0].update, slashStart);
+            assertEquals(mw.calls[1].args[0].update, slashStart);
+            assertEquals(mw.calls[2].args[0].update, msg);
+        });
+        it("which should pass all future context objects through the already installed middleware", async () => {
             const p: Update = {
                 update_id: 43,
                 message: { message_id, chat, date, text: "p" },
@@ -821,7 +868,34 @@ describe("The conversation engine", () => {
                     ) => (seq += "|" + (ctx.msg?.text ?? "0"), next()),
                 ),
             );
-            assertEquals(seq, "|/starta|pbp12c|qp12dq34eq56f|rp12q12q34q56g"); // read closely
+            assertEquals(
+                seq,
+                "|/starta|pbp12c|qp12q12dq34eq56f|rp12q12q34q56r12r34r56g", // read closely
+            );
+        });
+        it("which should allow middleware to consume updates", async () => {
+            const p: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "p" },
+            };
+            const q: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "q" },
+            };
+            const r: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "r" },
+            };
+            async function conv(conversation: MyConversation, ctx: MyContext) {
+                await conversation.run(async (ctx, next) => {
+                    if (!ctx.hasText("q")) await next();
+                });
+                assertFalse(ctx.hasText("q"));
+                return 42;
+            }
+            for (const u of [slashStart, p, q, r]) {
+                assertEquals(42, await testConversation(conv, u));
+            }
         });
     });
 });
