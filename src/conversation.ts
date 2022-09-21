@@ -560,16 +560,22 @@ export class ConversationHandle<C extends Context> {
         }
         const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
-        // Return original context if we're about to resume execution
-        if (!this._isReplaying) return this.currentCtx = this.ctx;
-        // Create fake context, and restore all enumerable properties
-        const ctx = Object.assign(
-            new Context(u, this.ctx.api, this.ctx.me),
-            x,
-        ) as C;
-        // Copy over functions which we could not store
-        // deno-lint-ignore no-explicit-any
-        f.forEach((p) => (ctx as any)[p] = (this.ctx as any)[p].bind(this.ctx));
+        let ctx: C;
+        if (!this._isReplaying) {
+            // Return original context if we're about to resume execution
+            ctx = this.ctx;
+        } else {
+            // Create fake context, and restore all enumerable properties
+            ctx = Object.assign(
+                new Context(u, this.ctx.api, this.ctx.me),
+                x,
+            ) as C;
+            // Copy over functions which we could not store
+            f.forEach((p) =>
+                // deno-lint-ignore no-explicit-any
+                (ctx as any)[p] = (this.ctx as any)[p].bind(this.ctx)
+            );
+        }
         this.currentCtx = ctx;
         await runAsLeaf(ctx, this.mw);
         return ctx;
@@ -944,8 +950,7 @@ export class ConversationHandle<C extends Context> {
     }
     async run(...middleware: Middleware<C>[]) {
         if (this.currentCtx === undefined) throw new Error("No context!");
-        const consumed = !await runAsLeaf(this.currentCtx, ...middleware);
-        if (consumed) await this.wait();
+        await runAsLeaf(this.currentCtx, ...middleware);
         this.mw.use(async (ctx, next) => {
             if (await runAsLeaf(ctx, ...middleware)) await next();
         });
