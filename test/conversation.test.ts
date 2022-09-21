@@ -73,6 +73,35 @@ describe("createConversation", () => {
             "Duplicate conversation identifier 'one'",
         );
     });
+    it("should take and respect timeouts", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        bot.use(
+            session({ initial: () => ({}) }),
+            conversations(),
+            createConversation(() => {
+                throw "never";
+            }, { id: "foo", millisecondsToWait: -1 }),
+            createConversation((c) => {
+                assertEquals(c.millisecondsToWait, 100);
+                throw "always";
+            }, { id: "bar", millisecondsToWait: 100 }),
+        );
+        bot.hears("foo", (ctx) => ctx.conversation.enter("foo"));
+        bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
+        await bot.handleUpdate({
+            update_id: 0,
+            message: { message_id, chat, date, text: "foo" },
+        });
+        await assertRejects(
+            () =>
+                bot.handleUpdate({
+                    update_id: 0,
+                    message: { message_id, chat, date, text: "bar" },
+                }),
+            BotError,
+            "always",
+        );
+    });
 });
 
 describe("ctx.conversation", () => {
@@ -116,6 +145,37 @@ describe("ctx.conversation", () => {
             await bot.handleUpdate(slashStart);
 
             assertEquals(1, func.calls.length);
+        });
+        it("can enter a function with timeout", async () => {
+            const bot = new Bot<MyContext>("dummy", { botInfo });
+
+            function foo(conversation: MyConversation) {
+                assertEquals(conversation.millisecondsToWait, 100);
+            }
+            function bar(conversation: MyConversation) {
+                assertEquals(conversation.millisecondsToWait, 500);
+            }
+            bot.use(
+                session({ initial: () => ({}) }),
+                conversations(),
+                createConversation(foo, { millisecondsToWait: 500 }),
+                createConversation(bar, { millisecondsToWait: 500 }),
+            );
+
+            bot.hears(
+                "foo",
+                (ctx) =>
+                    ctx.conversation.enter("foo", { millisecondsToWait: 100 }),
+            );
+            bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
+            await bot.handleUpdate({
+                update_id: 0,
+                message: { message_id, chat, date, text: "foo" },
+            });
+            await bot.handleUpdate({
+                update_id: 0,
+                message: { message_id, chat, date, text: "bar" },
+            });
         });
         it("can can overwrite the entered conversations", async () => {
             const bot = new Bot<MyContext>("dummy", { botInfo });
@@ -279,7 +339,7 @@ describe("The conversation engine", () => {
             ],
         );
     });
-    it("should not replay API calls after conversations", async () => {
+    it("should not store API calls after conversations", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
         bot.api.config.use(() => {
             return Promise.resolve({ ok: true, result: true as any });
@@ -321,6 +381,17 @@ describe("The conversation engine", () => {
             () => bot.handleUpdate(slashStart),
             BotError,
             "Replay stack exhausted",
+        );
+    });
+    it("should respect wait timeouts", async () => {
+        await testConversation(
+            async (conversation: MyConversation) => {
+                await conversation.wait();
+                conversation.millisecondsToWait = -1;
+                await conversation.wait();
+                throw "never";
+            },
+            [slashStart, slashStart],
         );
     });
     it("should protect against invalid unlogs", async () => {

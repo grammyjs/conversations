@@ -89,6 +89,19 @@ class ConversationControls {
      */
     public enter(id: string, _opts: {
         /**
+         * Maximum number of milliseconds to wait this time that the
+         * conversation is entered. If an update is received after this time has
+         * elapsed, the conversation will be left automatically instead of
+         * resuming, and the update will be handled as if the conversation had
+         * not been active. Overrides the default value in `createConversation`
+         * if it was specified.
+         *
+         * This is the default value for each `wait` call. Note that you can
+         * always adjust this value from within a conversation by assigning a
+         * new value to `conversation.millisecondsToWait`.
+         */
+        millisecondsToWait?: number;
+        /**
          * Specify `true` if all running conversations in the same chat should
          * be terminated before entering this conversation. Defaults to `false`.
          */
@@ -158,6 +171,16 @@ interface ActiveConversation {
      * replay past operations when resuming.
      */
     log: OpLog;
+    /**
+     * Date of creation in milliseconds since The Epoch. Used to implement
+     * `conversation.millisecondsToWait`.
+     */
+    crt: number;
+    /**
+     * Time to wait in milliseconds since The Epoch. Used to implement
+     * `conversation.millisecondsToWait`.
+     */
+    ttw?: number;
 }
 /**
  * Describes a log entry that does not only know its chronological position in
@@ -259,10 +282,10 @@ function conversationRunner<C extends Context>(
      * handled the update, i.e. completed normally or via a wait call. Note that
      * this function re-throws errors thrown by the conversation.
      */
-    async function run(log: OpLog) {
+    async function run(data: ActiveConversation) {
         // Create the conversation handle
         const rsr = resolver<ResolveOps>(); // used to catch `wait` calls
-        const handle = new ConversationHandle<C>(ctx, log, rsr);
+        const handle = new ConversationHandle<C>(ctx, data, rsr);
         // We are either starting the conversation builder function from
         // scratch, or we are beginning a replay operation. In both cases, the
         // current context object is new to the conversation builder function,
@@ -331,19 +354,46 @@ export function conversations<C extends Context>(): MiddlewareFn<
 }
 
 /**
+ * Configuration options that can be passed when using `createConversation` to
+ * turn a conversation builder function into middleware.
+ */
+export interface ConversationConfig {
+    /**
+     * Identifier of the conversation which can be used to enter it. Defaults to
+     * the name of the function.
+     */
+    id?: string;
+    /**
+     * Maximum number of milliseconds to wait. If an update is received after
+     * this time has elapsed, the conversation will be left automatically
+     * instead of resuming, and the update will be handled as if the
+     * conversation had not been active.
+     *
+     * This is the default value that each conversation with this identifier
+     * starts with. Note that you can override this value for a specific run of
+     * the conversation when calling `ctx.conversation.enter`. In addition, you
+     * can adjust this value from within a conversation between wait calls by
+     * assigning a new value to `conversation.millisecondsToWait`.
+     */
+    millisecondsToWait?: number;
+}
+
+/**
  * Takes a conversation builder function, and turns it into grammY middleware
  * which can be installed on your bot. Check out the
  * [documentation](https://grammy.dev/plugins/conversations.html) to learn more
  * about how conversation builder functions can be created.
  *
  * @param builder Conversation builder function
- * @param id Identifier of the conversation, defaults to `builder.name`
+ * @param config Identifier of the conversation or configuration object
  * @returns Middleware to be installed on the bot
  */
 export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
-    id = builder.name,
+    config: string | ConversationConfig = {},
 ): MiddlewareFn<C & ConversationFlavor> {
+    const { id = builder.name, millisecondsToWait }: ConversationConfig =
+        typeof config === "string" ? { id: config } : config;
     if (!id) throw new Error("Cannot register a function without name!");
     return async (ctx, next) => {
         if (ctx.conversation === undefined) {
@@ -360,7 +410,7 @@ export function createConversation<C extends Context>(
         index.add(id);
 
         // Define how to run a conversation builder function
-        const runOnLog = conversationRunner(ctx, builder);
+        const runOnData = conversationRunner(ctx, builder);
 
         /**
          * Runs our conversation builder function for all given logs in
@@ -370,8 +420,15 @@ export function createConversation<C extends Context>(
             let op: ResolveOps = "skip";
             for (let i = 0; op === "skip" && i < conversations.length; i++) {
                 const current = conversations[i];
+                if (
+                    current.crt !== undefined && current.ttw !== undefined &&
+                    current.crt + current.ttw < Date.now() // check expiry
+                ) {
+                    conversations.splice(i--, 1);
+                    continue;
+                }
                 try {
-                    op = await runOnLog(current.log);
+                    op = await runOnData(current);
                 } catch (e) {
                     conversations.splice(i, 1);
                     throw e;
@@ -390,7 +447,12 @@ export function createConversation<C extends Context>(
             }
             const session = await ctx.session;
             session.conversation ??= {};
-            const entry: ActiveConversation = { log: { u: [] } };
+            const entry: ActiveConversation = {
+                log: { u: [] },
+                crt: Date.now(),
+            };
+            const timeout = opts?.millisecondsToWait ?? millisecondsToWait;
+            if (timeout !== undefined) entry.ttw = timeout;
             const append = [entry];
             if (opts?.overwrite) session.conversation[id] = append;
             else (session.conversation[id] ??= []).push(...append);
@@ -512,7 +574,7 @@ export class ConversationHandle<C extends Context> {
 
     constructor(
         private readonly ctx: C,
-        private readonly opLog: OpLog,
+        private readonly data: ActiveConversation,
         private readonly rsr: Resolver<ResolveOps>,
     ) {
         // We intercept Bot API calls, returning logged responses while
@@ -543,7 +605,7 @@ export class ConversationHandle<C extends Context> {
      * you know exactly what you are doing.
      */
     get _isReplaying() {
-        return this.replayIndex.wait < this.opLog.u.length;
+        return this.replayIndex.wait < this.data.log.u.length;
     }
     /**
      * Internal method, replays a wait operation and advances the replay cursor.
@@ -557,9 +619,9 @@ export class ConversationHandle<C extends Context> {
         }
         if (this.replayIndex.wait > 0) {
             // Previous session won't be saved anymore so we freeze it
-            deepFreeze(this.opLog.u[this.replayIndex.wait - 1].x.session);
+            deepFreeze(this.data.log.u[this.replayIndex.wait - 1].x.session);
         }
-        const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
+        const { u, x, f = [] } = this.data.log.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
         // Return original context if we're about to resume execution
         if (!this._isReplaying) return this.ctx;
@@ -586,7 +648,7 @@ export class ConversationHandle<C extends Context> {
             this.replayIndex.api.set(method, index);
         }
         const result =
-            this.opLog.u[this.replayIndex.wait - 1].a?.[method][index];
+            this.data.log.u[this.replayIndex.wait - 1].a?.[method][index];
         this.replayIndex.api?.set(method, 1 + index);
         if (result === undefined) {
             return new Promise<never>(() => {});
@@ -601,7 +663,7 @@ export class ConversationHandle<C extends Context> {
     _replayExt(): Promise<NonNullable<ExtOp["r"]>> {
         let index = this.replayIndex.ext;
         if (index === undefined) this.replayIndex.ext = index = 0;
-        const result = this.opLog.u[this.replayIndex.wait - 1].e?.[index];
+        const result = this.data.log.u[this.replayIndex.wait - 1].e?.[index];
         this.replayIndex.ext = 1 + index;
         if (result === undefined) return new Promise<never>(() => {});
         return this._resolveAt(result.i, result.r);
@@ -611,14 +673,14 @@ export class ConversationHandle<C extends Context> {
      * what you are doing.
      */
     _logWait(op: WaitOp) {
-        this.opLog.u.push(op);
+        this.data.log.u.push(op);
     }
     /**
      * Internal method, unlogs the most recent call. Do not use unless you know
      * exactly what you are doing.
      */
     _unlogWait() {
-        const op = this.opLog.u.pop();
+        const op = this.data.log.u.pop();
         if (op === undefined) throw new Error("Empty log, cannot unlog!");
         return op;
     }
@@ -629,7 +691,7 @@ export class ConversationHandle<C extends Context> {
     _logApi(method: string): ApiOp {
         const index = this.replayIndex.wait;
         const slot = { i: -1 };
-        ((this.opLog.u[index - 1].a ??= {})[method] ??= []).push(slot);
+        ((this.data.log.u[index - 1].a ??= {})[method] ??= []).push(slot);
         return slot;
     }
     /**
@@ -639,7 +701,7 @@ export class ConversationHandle<C extends Context> {
     _logExt(): ExtOp {
         const index = this.replayIndex.wait;
         const slot = { i: -1 };
-        (this.opLog.u[index - 1].e ??= []).push(slot);
+        (this.data.log.u[index - 1].e ??= []).push(slot);
         return slot;
     }
     /**
@@ -672,6 +734,25 @@ export class ConversationHandle<C extends Context> {
         };
         setTimeout(resolveNext, 0);
         return r.promise;
+    }
+
+    /**
+     * Maximum number of milliseconds to wait. If an update is received after
+     * this time has elapsed, the conversation will be left automatically
+     * instead of resuming, and the update will be handled as if the
+     * conversation had not been entered.
+     *
+     * Defaults to the value that was passed when calling
+     * `ctx.conversation.enter`. If no value was passed when calling
+     * `ctx.conversation.enter`, defaults to the value that was specified when
+     * calling `createConversation`. If no value was specified when calling
+     * `createConversation` either, this conversation waits forever.
+     */
+    get millisecondsToWait() {
+        return this.data.ttw;
+    }
+    set millisecondsToWait(ms: number | undefined) {
+        this.data.ttw = ms;
     }
 
     /**
