@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import { assert } from "https://deno.land/std@0.153.0/_util/assert.ts";
 import {
     assertEquals,
