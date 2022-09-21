@@ -1,8 +1,12 @@
 import {
     type ApiResponse,
+    type CallbackQueryContext,
+    type CommandContext,
     Context,
     type Filter,
     type FilterQuery,
+    type GameQueryContext,
+    type HearsContext,
     type LazySessionFlavor,
     type MiddlewareFn,
     type RawApi,
@@ -19,6 +23,9 @@ import {
     type Resolver,
     resolver,
 } from "./utils.ts";
+type MaybeArray<T> = T | T[];
+// deno-lint-ignore ban-types
+type StringWithSuggestions<S extends string> = (string & {}) | S;
 
 /**
  * A user-defined builder function that can be turned into middleware for a
@@ -755,6 +762,70 @@ export class ConversationHandle<C extends Context> {
     }
 
     /**
+     * Waits for a new message or channel post that contains the given text, or
+     * that contains text which matches the given regular expression. This uses
+     * the same logic as `bot.hears`.
+     *
+     * @param trigger The string or regex to match
+     * @param otherwise Optional handler for discarded updates
+     */
+    async waitForHears(
+        trigger: MaybeArray<string | RegExp>,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+    ): Promise<HearsContext<C>> {
+        return await this.waitUntil(Context.has.text(trigger), otherwise);
+    }
+
+    /**
+     * Waits for the specified command. This uses the same logic as
+     * `bot.command`.
+     *
+     * @param command The command to match
+     * @param otherwise Optional handler for discarded updates
+     */
+    async waitForCommand<S extends string>(
+        command: MaybeArray<
+            StringWithSuggestions<S | "start" | "help" | "settings">
+        >,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+    ): Promise<CommandContext<C>> {
+        return await this.waitUntil(Context.has.command(command), otherwise);
+    }
+
+    /**
+     * Waits for an update which contains the given callback query, or for the
+     * callback query data to match the given regular expression. This uses the
+     * same logic as `bot.callbackQuery`.
+     *
+     * @param trigger The string or regex to match
+     * @param otherwise Optional handler for discarded updates
+     */
+    async waitForCallbackQuery(
+        trigger: MaybeArray<string | RegExp>,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+    ): Promise<CallbackQueryContext<C>> {
+        return await this.waitUntil(
+            Context.has.callbackQuery(trigger),
+            otherwise,
+        );
+    }
+
+    /**
+     * Waits for an update which contains the given game query, or for the
+     * game query data to match the given regular expression. This uses the
+     * same logic as `bot.gameQuery`.
+     *
+     * @param trigger The string or regex to match
+     * @param otherwise Optional handler for discarded updates
+     */
+    async waitForGameQuery(
+        trigger: MaybeArray<string | RegExp>,
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+    ): Promise<GameQueryContext<C>> {
+        return await this.waitUntil(Context.has.gameQuery(trigger), otherwise);
+    }
+
+    /**
      * Waits for a new update (e.g. a message, callback query, etc) from the
      * given user. As soon as an update arrives from this user, the
      * corresponding context object is returned.
@@ -772,9 +843,29 @@ export class ConversationHandle<C extends Context> {
         return await this.waitUntil(predicate, otherwise);
     }
 
-    // TODO: implement command matching
-    // TODO: implement hears matching
-    // TODO: implement callback, game, and inline query matching
+    /**
+     * Waits for a new message or channel post which replies to the specified
+     * message. As soon as an update arrives that contains such a message or
+     * channel post, the corresponding context object is returned.
+     *
+     * @param message_id The message to which to reply
+     * @param otherwise Optional handler for discarded updates
+     */
+    async waitForReplyTo(
+        message_id: number | { message_id: number },
+        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+    ) {
+        console.log("asdf");
+        const id = typeof message_id === "number"
+            ? message_id
+            : message_id.message_id;
+        return await this.waitUntil(
+            (ctx): ctx is Filter<C, "message" | "channel_post"> =>
+                ctx.message?.reply_to_message?.message_id === id ||
+                ctx.channelPost?.reply_to_message?.message_id === id,
+            otherwise,
+        );
+    }
 
     /**
      * Utilities for building forms. Contains methods that let you wait for

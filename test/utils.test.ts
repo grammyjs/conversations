@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import d from "https://cdn.skypack.dev/debug@4.3.4";
 // For some strange reason the debug module always prints logs???
 d.log = () => {};
@@ -13,8 +14,8 @@ import {
     type Chat,
     Composer,
     type Context,
-    Middleware,
-    RawApi,
+    type Middleware,
+    type RawApi,
     session,
     type Update,
 } from "../src/deps.deno.ts";

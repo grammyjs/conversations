@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import { assert } from "https://deno.land/std@0.153.0/_util/assert.ts";
 import {
     assertEquals,
@@ -406,57 +407,276 @@ describe("The conversation engine", () => {
     describe("provides conversation.waitUntil", () => {
         it("which should be able to wait for a condition to hold", async () => {
             let count = 0;
-            await testConversation(
-                async (conversation) => {
-                    await conversation.waitUntil(
-                        () => count === 2,
-                        () => count++,
-                    );
-                    assertEquals(count, 2);
-                },
-                [slashStart, slashStart, slashStart, slashStart],
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        await conversation.waitUntil(
+                            () => count === 2,
+                            () => count++,
+                        );
+                        assertEquals(count, 2);
+                        return 42;
+                    },
+                    [slashStart, slashStart, slashStart],
+                ),
             );
         });
     });
     describe("provides conversation.waitUnless", () => {
         it("which should be able to wait for a condition not to hold", async () => {
             let count = 0;
-            await testConversation(
-                async (conversation) => {
-                    await conversation.waitUnless(
-                        () => count !== 2,
-                        () => count++,
-                    );
-                    assertEquals(count, 2);
-                },
-                [slashStart, slashStart, slashStart, slashStart],
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        await conversation.waitUnless(
+                            () => count !== 2,
+                            () => count++,
+                        );
+                        assertEquals(count, 2);
+                        return 42;
+                    },
+                    [slashStart, slashStart, slashStart],
+                ),
             );
         });
     });
     describe("provides conversation.waitFor", () => {
         it("which should be able to wait for a filter query", async () => {
-            await testConversation(
-                async (conversation) => {
-                    const ctx = await conversation.waitFor("message:text");
-                    assertEquals(ctx.msg.text, "yay!");
-                },
-                [{
-                    update_id: 0,
-                    message: {
-                        message_id,
-                        chat,
-                        date,
-                        document: { file_id: "abc", file_unique_id: "xyz" },
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        const ctx = await conversation.waitFor("message:text");
+                        assertEquals(ctx.msg.text, "yay!");
+                        return 42;
                     },
-                }, {
-                    update_id: 0,
-                    message: {
-                        message_id,
-                        chat,
-                        date,
-                        text: "yay!",
+                    [{
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            document: { file_id: "abc", file_unique_id: "xyz" },
+                        },
+                    }, {
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            text: "yay!",
+                        },
+                    }],
+                ),
+            );
+        });
+    });
+    describe("provides conversation.waitForHears", () => {
+        it("which should be able to wait for a text", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        let ctx = await conversation.waitForHears("yay!");
+                        assertEquals(ctx.msg.text, "yay!");
+                        ctx = await conversation.waitForHears(/^ya.*/);
+                        assertEquals(ctx.msg.caption, "yay!");
+                        return 42;
                     },
-                }],
+                    [{
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            document: { file_id: "abc", file_unique_id: "xyz" },
+                        },
+                    }, {
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            text: "yay!",
+                        },
+                    }, {
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            text: "oh yay!",
+                        },
+                    }, {
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            document: { file_id: "abc", file_unique_id: "xyz" },
+                            caption: "yay!",
+                        },
+                    }],
+                ),
+            );
+        });
+    });
+    describe("provides conversation.waitForCommand", () => {
+        it("which should be able to wait for a command", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        const ctx = await conversation.waitForCommand("start");
+                        assertEquals(ctx.msg.text, "/start");
+                        return 42;
+                    },
+                    [{
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            document: { file_id: "abc", file_unique_id: "xyz" },
+                        },
+                    }, slashStart],
+                ),
+            );
+        });
+    });
+    describe("provides conversation.waitForCallbackQuery", () => {
+        it("which should be able to wait for a callback query", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        let ctx = await conversation.waitForCallbackQuery(
+                            "data",
+                        );
+                        assertEquals(ctx.callbackQuery.data, "data");
+                        ctx = await conversation.waitForCallbackQuery(/^da.*/);
+                        assertEquals(ctx.callbackQuery.data, "data");
+                        return 42;
+                    },
+                    [{
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            document: { file_id: "abc", file_unique_id: "xyz" },
+                        },
+                    }, {
+                        update_id: 0,
+                        callback_query: {
+                            id: "abc",
+                            chat_instance: "01234",
+                            message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "hi",
+                            },
+                            from: botInfo,
+                            data: "data",
+                        },
+                    }, {
+                        update_id: 0,
+                        callback_query: {
+                            id: "abc",
+                            chat_instance: "01234",
+                            message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "hi",
+                            },
+                            from: botInfo,
+                        },
+                    }, {
+                        update_id: 0,
+                        callback_query: {
+                            id: "abc",
+                            chat_instance: "01234",
+                            message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "hi",
+                            },
+                            from: botInfo,
+                            data: "data",
+                        },
+                    }],
+                ),
+            );
+        });
+    });
+    describe("provides conversation.waitForGameQuery", () => {
+        it("which should be able to wait for a game query", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        let ctx = await conversation.waitForGameQuery("game");
+                        assertEquals(ctx.callbackQuery.game_short_name, "game");
+                        ctx = await conversation.waitForGameQuery(/^ga.*/);
+                        assertEquals(ctx.callbackQuery.game_short_name, "game");
+                        return 42;
+                    },
+                    [{
+                        update_id: 0,
+                        message: {
+                            message_id,
+                            chat,
+                            date,
+                            document: { file_id: "abc", file_unique_id: "xyz" },
+                        },
+                    }, {
+                        update_id: 0,
+                        callback_query: {
+                            id: "abc",
+                            chat_instance: "01234",
+                            from: botInfo,
+                            game_short_name: "game",
+                            message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "msg",
+                            },
+                        },
+                    }, {
+                        update_id: 0,
+                        callback_query: {
+                            id: "abc",
+                            chat_instance: "01234",
+                            from: botInfo,
+                            message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "msg",
+                            },
+                        },
+                    }, {
+                        update_id: 0,
+                        callback_query: {
+                            id: "abc",
+                            chat_instance: "01234",
+                            from: botInfo,
+                            game_short_name: "game",
+                            message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "msg",
+                            },
+                        },
+                    }],
+                ),
             );
         });
     });
@@ -571,6 +791,95 @@ describe("The conversation engine", () => {
                         text: "yay!",
                     },
                 }],
+            );
+        });
+    });
+    describe("provides conversation.waitForReplyTo", () => {
+        it("which should be able to wait for a reply", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        let ctx = await conversation.waitForReplyTo(
+                            message_id,
+                        );
+                        assertEquals(ctx.msg?.text, "yay!");
+                        ctx = await conversation.waitForReplyTo(
+                            ctx.msg,
+                        );
+                        assertEquals(ctx.msg?.text, "yay!");
+                        return 42;
+                    },
+                    [{
+                        update_id: 0,
+                        message: {
+                            message_id: 2,
+                            chat,
+                            date,
+                            text: "nope",
+                        },
+                    }, {
+                        update_id: 0,
+                        message: {
+                            message_id: 3,
+                            reply_to_message: {
+                                message_id: message_id - 1,
+                                chat,
+                                date,
+                                text: "nope",
+                                reply_to_message: undefined,
+                            },
+                            chat,
+                            date,
+                            text: "nope",
+                        },
+                    }, {
+                        update_id: 0,
+                        message: {
+                            message_id: 2444,
+                            reply_to_message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "nope",
+                                reply_to_message: undefined,
+                            },
+                            chat,
+                            date,
+                            text: "yay!",
+                        },
+                    }, {
+                        update_id: 0,
+                        channel_post: {
+                            message_id: 27,
+                            reply_to_message: {
+                                message_id,
+                                chat,
+                                date,
+                                text: "nope",
+                                reply_to_message: undefined,
+                            },
+                            chat,
+                            date,
+                            text: "nah",
+                        },
+                    }, {
+                        update_id: 0,
+                        channel_post: {
+                            message_id: 2,
+                            reply_to_message: {
+                                message_id: 2444,
+                                chat,
+                                date,
+                                text: "hmm",
+                                reply_to_message: undefined,
+                            },
+                            chat,
+                            date,
+                            text: "yay!",
+                        },
+                    }],
+                ),
             );
         });
     });
