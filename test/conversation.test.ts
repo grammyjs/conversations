@@ -280,6 +280,70 @@ describe("The conversation engine", () => {
             ],
         );
     });
+    it("should be able to skip updates", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        const api = spy((_prev, _method: string) =>
+            Promise.resolve({ ok: true as const, result: true as any })
+        );
+        bot.api.config.use(api);
+        async function conv(conversation: MyConversation, ctx: MyContext) {
+            await ctx.reply("inside");
+            await conversation.skip();
+            throw "never";
+        }
+        bot.use(
+            session({ initial: () => ({}) }),
+            conversations(),
+            createConversation(conv),
+        );
+        bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+        bot.use((ctx) => ctx.reply("outside"));
+        await bot.handleUpdate(slashStart);
+        assertEquals(api.calls.length, 1);
+        assertEquals(api.calls[0].args[1], "sendMessage");
+        await bot.handleUpdate({
+            update_id: 42,
+            message: { message_id, chat, date, text: "msg" },
+        });
+        assertEquals(api.calls.length, 3);
+        assertEquals(api.calls[1].args[1], "sendMessage");
+        assertEquals(api.calls[2].args[1], "sendMessage");
+    });
+    it("should be able to drop skipped updates", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        const api = spy((_prev, _method: string) =>
+            Promise.resolve({ ok: true as const, result: true as any })
+        );
+        bot.api.config.use(api);
+        async function conv(conversation: MyConversation, ctx: MyContext) {
+            await ctx.reply("inside");
+            if (ctx.hasCommand("start")) {
+                await conversation.skip({ drop: true });
+                throw "never";
+            } else {
+                await ctx.reply("after");
+            }
+        }
+        bot.use(
+            session({ initial: () => ({}) }),
+            conversations(),
+            createConversation(conv),
+        );
+        bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+        bot.use(() => {
+            throw "never";
+        });
+        await bot.handleUpdate(slashStart);
+        assertEquals(api.calls.length, 1);
+        assertEquals(api.calls[0].args[1], "sendMessage");
+        await bot.handleUpdate({
+            update_id: 42,
+            message: { message_id, chat, date, text: "msg" },
+        });
+        assertEquals(api.calls.length, 3);
+        assertEquals(api.calls[1].args[1], "sendMessage");
+        assertEquals(api.calls[2].args[1], "sendMessage");
+    });
     it("should not replay API calls after conversations", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
         bot.api.config.use(() => {
