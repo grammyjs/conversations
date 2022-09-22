@@ -10,10 +10,20 @@ import { spy } from "https://deno.land/std@0.156.0/testing/mock.ts";
 import {
     type Conversation,
     type ConversationFlavor,
+    ConversationHandle,
     conversations,
     createConversation,
 } from "../src/conversation.ts";
-import { Bot, BotError, type Context, session } from "../src/deps.deno.ts";
+import {
+    Api,
+    Bot,
+    BotError,
+    Context,
+    lazySession,
+    session,
+    SessionFlavor,
+} from "../src/deps.deno.ts";
+import { resolver } from "../src/utils.ts";
 import {
     chat,
     date,
@@ -645,6 +655,49 @@ describe("The conversation engine", () => {
             );
         });
     });
+    describe("provides conversation.session", () => {
+        it("which should verify it has a current context object", () => {
+            const handle = new ConversationHandle(
+                new Context(
+                    undefined as any,
+                    new Api(""),
+                    botInfo,
+                ) as MyContext,
+                { u: [] },
+                resolver(),
+            );
+            assertThrows(() => handle.session, "No context");
+            assertThrows(() => (handle.session = undefined), "No context");
+        });
+        it("which should be ctx.session", async () => {
+            type C = MyContext & SessionFlavor<{ foo: string }>;
+            const bot = new Bot<C>(
+                "dummy",
+                { botInfo },
+            );
+            async function conv(conversation: Conversation<C>, ctx: C) {
+                assertEquals(conversation.session, ctx.session);
+                ctx.session.foo = "okay?";
+                assertEquals(conversation.session, ctx.session);
+                ctx = await conversation.wait();
+                assertEquals(conversation.session, ctx.session);
+                conversation.session.foo = "hmm";
+                assertEquals(conversation.session, ctx.session);
+                ctx = await conversation.wait();
+                assertEquals(conversation.session, ctx.session);
+                throw "done";
+            }
+            bot.use(
+                lazySession({ initial: () => ({ foo: "hi" }) }),
+                conversations(),
+                createConversation(conv),
+            );
+            bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+            await bot.handleUpdate(slashStart);
+            await bot.handleUpdate(slashStart);
+            assertRejects(() => bot.handleUpdate(slashStart), BotError, "done");
+        });
+    });
     describe("provides conversation.sleep", () => {
         it("which should sleep", async () => {
             await testConversation(
@@ -659,7 +712,7 @@ describe("The conversation engine", () => {
                 },
             );
         });
-        it("which should not sleep during reply", async () => {
+        it("which should not sleep during replaying", async () => {
             await testConversation(
                 async (conversation) => {
                     const before = Date.now();
