@@ -871,6 +871,7 @@ export class ConversationHandle<C extends Context> {
             this._finalize(slot);
         }
     }
+
     /**
      * Safe alias for `ctx.session`. Use this instead of `ctx.session` when
      * inside a conversation.
@@ -909,11 +910,21 @@ export class ConversationHandle<C extends Context> {
         ctx.session = value;
     }
     /**
-     * Sleep for the specified number of milliseconds. You should use this
-     * instead of your own sleeping function so that you don't block the
-     * conversation while it is restoring a previous position.
+     * > This method is rarely useful because it freezes your bot and that's
+     * > most likely not actually what you want to do. Consider using one of the
+     * > variants of `wait` instead.
      *
-     * @param milliseconds The number of milliseconds to wait
+     * Freezes your bot for the specified number of milliseconds. The current
+     * middleware execution will simply stop for a while. Note that if you're
+     * processing updates concurrently (with grammY runner) then unrelated
+     * updates will still be handled in the meantime. Note further that sleeping
+     * during webhooks is dangerous because [it can lead to duplicate
+     * updates](https://grammy.dev/guide/deployment-types.html#ending-webhook-requests-in-time).
+     *
+     * You should use this instead of your own sleeping function so that you
+     * don't block the conversation while it is restoring a previous position.
+     *
+     * @param milliseconds The number of milliseconds to sleep
      */
     async sleep(milliseconds: number): Promise<void> {
         if (this._isReplaying) return;
