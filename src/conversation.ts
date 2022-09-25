@@ -17,7 +17,6 @@ import {
 import { ConversationForm } from "./form.ts";
 import {
     clone,
-    deepFreeze,
     ident,
     IS_NOT_INTRINSIC,
     type Resolver,
@@ -546,6 +545,7 @@ export type Conversation<C extends Context> = ConversationHandle<C>;
  */
 export class ConversationHandle<C extends Context> {
     private replayIndex: ReplayIndex = { wait: 0 };
+    private currentCtx?: C;
     private active = true;
 
     constructor(
@@ -593,14 +593,10 @@ export class ConversationHandle<C extends Context> {
                 "Replay stack exhausted, you may not call this method!",
             );
         }
-        if (this.replayIndex.wait > 0) {
-            // Previous session won't be saved anymore so we freeze it
-            deepFreeze(this.opLog.u[this.replayIndex.wait - 1].x.session);
-        }
         const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
         // Return original context if we're about to resume execution
-        if (!this._isReplaying) return this.ctx;
+        if (!this._isReplaying) return this.currentCtx = this.ctx;
         // Create fake context, and restore all enumerable properties
         const ctx = Object.assign(
             new Context(u, this.ctx.api, this.ctx.me),
@@ -609,6 +605,7 @@ export class ConversationHandle<C extends Context> {
         // Copy over functions which we could not store
         // deno-lint-ignore no-explicit-any
         f.forEach((p) => (ctx as any)[p] = (this.ctx as any)[p].bind(this.ctx));
+        this.currentCtx = ctx;
         return ctx;
     }
 
@@ -991,12 +988,60 @@ export class ConversationHandle<C extends Context> {
             this._finalize(slot);
         }
     }
+
     /**
-     * Sleep for the specified number of milliseconds. You should use this
-     * instead of your own sleeping function so that you don't block the
-     * conversation while it is restoring a previous position.
+     * Safe alias for `ctx.session`. Use this instead of `ctx.session` when
+     * inside a conversation.
      *
-     * @param milliseconds The number of milliseconds to wait
+     * As you call `conversation.wait` several times throughout the
+     * conversation, your session data may evolve. The conversations plugin
+     * makes sure to track these changes so that your conversation can work
+     * correctly each time it is run. This means that there are several
+     * snapshots of the session throughout time which all co-exist. It can be
+     * cumbersome to always make sure to use the correct session so that the
+     * code does not alter history (this would lead to data loss). You should
+     * use this helper type to make sure you are accessing the correct session
+     * object at all times.
+     */
+    // deno-lint-ignore no-explicit-any
+    get session(): C extends { session: any } ? C["session"] : never {
+        if (this.currentCtx === undefined) throw new Error("No context!");
+        const ctx: C & {
+            // deno-lint-ignore no-explicit-any
+            session?: C extends { session: any } ? C["session"] : never;
+        } = this.currentCtx;
+        if (ctx.session === undefined) {
+            throw new Error("Session is missing!");
+        }
+        return ctx.session;
+    }
+    set session(
+        // deno-lint-ignore no-explicit-any
+        value: C extends { session: any } ? C["session"] | undefined : never,
+    ) {
+        if (this.currentCtx === undefined) throw new Error("No context!");
+        const ctx: C & {
+            // deno-lint-ignore no-explicit-any
+            session?: C extends { session: any } ? C["session"] : never;
+        } = this.currentCtx;
+        ctx.session = value;
+    }
+    /**
+     * > This method is rarely useful because it freezes your bot and that's
+     * > most likely not actually what you want to do. Consider using one of the
+     * > variants of `wait` instead.
+     *
+     * Freezes your bot for the specified number of milliseconds. The current
+     * middleware execution will simply stop for a while. Note that if you're
+     * processing updates concurrently (with grammY runner) then unrelated
+     * updates will still be handled in the meantime. Note further that sleeping
+     * during webhooks is dangerous because [it can lead to duplicate
+     * updates](https://grammy.dev/guide/deployment-types.html#ending-webhook-requests-in-time).
+     *
+     * You should use this instead of your own sleeping function so that you
+     * don't block the conversation while it is restoring a previous position.
+     *
+     * @param milliseconds The number of milliseconds to sleep
      */
     async sleep(milliseconds: number): Promise<void> {
         if (this._isReplaying) return;
