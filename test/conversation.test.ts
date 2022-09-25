@@ -734,7 +734,7 @@ describe("The conversation engine", () => {
                     new Api(""),
                     botInfo,
                 ) as MyContext,
-                { u: [] },
+                { log: { u: [] }, crt: 0 },
                 resolver(),
             );
             assertThrows(() => handle.session, "No context");
