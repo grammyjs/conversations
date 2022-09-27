@@ -565,8 +565,18 @@ export class ConversationHandle<C extends Context> {
             x,
         ) as C;
         // Copy over functions which we could not store
-        // deno-lint-ignore no-explicit-any
-        f.forEach((p) => (ctx as any)[p] = (this.ctx as any)[p].bind(this.ctx));
+        f.forEach((key) => {
+            // deno-lint-ignore no-explicit-any
+            const current = (this.ctx as any)[key];
+            if (typeof current !== "function") {
+                console.error(
+                    `WARNING: grammY conversations: Previously installed function '${key}' is now missing on context object! Is the middleware order incorrect?`,
+                );
+                return;
+            }
+            // deno-lint-ignore no-explicit-any
+            (ctx as any)[key] = current.bind(this.ctx);
+        });
         this.currentCtx = ctx;
         return ctx;
     }
