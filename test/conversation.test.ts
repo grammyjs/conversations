@@ -788,14 +788,14 @@ describe("The conversation engine", () => {
     });
     describe("provides conversation.log", () => {
         it("which should print logs", async () => {
-            const log = spy(console, "log");
+            const log = stub(console, "log");
             await testConversation((conversation) => conversation.log("debug"));
             assertEquals(log.calls.length, 1);
             assertEquals(log.calls[0].args, ["debug"]);
             log.restore();
         });
         it("which should not print logs during replaying", async () => {
-            const log = spy(console, "log");
+            const log = stub(console, "log");
             await testConversation(
                 async (conversation) => {
                     conversation.log("debug");
