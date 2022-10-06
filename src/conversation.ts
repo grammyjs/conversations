@@ -20,10 +20,24 @@ import {
 } from "./utils.ts";
 
 /**
- * A user-defined builder function that can be turned into middleware for a
- * conversation.
+ * A user-defined conversation builder function that can be turned into
+ * middleware for a conversation. This is the type of the function that you
+ * should use to write your conversation. It can be used like so:
+ *
+ * ```ts
+ * const myConversation: ConversationFn<MyContext> = async (conversation, ctx) => {
+ *   // TODO define the conversation
+ * }
+ * ```
+ *
+ * The first parameter is the conversation handle which you can use to wait for
+ * new messages, use forms, and access utilies such as random number generation.
+ *
+ * The second parameter is the initial context object. In this parameter, the
+ * conversation builder function will receive the context object that was
+ * received when the conversation was started.
  */
-type ConversationBuilder<C extends Context> = (
+export type ConversationFn<C extends Context> = (
     conversation: Conversation<C>,
     ctx: C,
 ) => unknown | Promise<unknown>;
@@ -221,7 +235,7 @@ type ResolveOps = "wait" | "skip" | "done";
  */
 function conversationRunner<C extends Context>(
     ctx: C & ConversationFlavor,
-    builder: ConversationBuilder<C>,
+    builder: ConversationFn<C>,
 ) {
     /**
      * Adds an entry for the current context object to the given log,
@@ -340,7 +354,7 @@ export function conversations<C extends Context>(): MiddlewareFn<
  * @returns Middleware to be installed on the bot
  */
 export function createConversation<C extends Context>(
-    builder: ConversationBuilder<C>,
+    builder: ConversationFn<C>,
     id = builder.name,
 ): MiddlewareFn<C & ConversationFlavor> {
     if (!id) throw new Error("Cannot register a function without name!");
