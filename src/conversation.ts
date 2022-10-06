@@ -1,8 +1,12 @@
 import {
     type ApiResponse,
+    type CallbackQueryContext,
+    type CommandContext,
     Context,
     type Filter,
     type FilterQuery,
+    type GameQueryContext,
+    type HearsContext,
     type LazySessionFlavor,
     type MiddlewareFn,
     type RawApi,
@@ -18,6 +22,9 @@ import {
     type Resolver,
     resolver,
 } from "./utils.ts";
+type MaybeArray<T> = T | T[];
+// deno-lint-ignore ban-types
+type StringWithSuggestions<S extends string> = (string & {}) | S;
 
 /**
  * A user-defined conversation builder function that can be turned into
@@ -250,7 +257,7 @@ interface ExtOp extends AsyncOrder {
 }
 
 /** Ops that can lead to intertuption of function execution */
-type ResolveOps = "wait" | "skip" | "done";
+type ResolveOps = "wait" | "skip" | "drop" | "done";
 
 /**
  * Creates a runner function which is in turn able to execute conversation
@@ -431,7 +438,11 @@ export function createConversation<C extends Context>(
          */
         async function runUntilComplete(conversations: ActiveConversation[]) {
             let op: ResolveOps = "skip";
-            for (let i = 0; op === "skip" && i < conversations.length; i++) {
+            for (
+                let i = 0;
+                (op === "skip" || op === "drop") && i < conversations.length;
+                i++
+            ) {
                 const current = conversations[i];
                 if (
                     current.crt !== undefined && current.ttw !== undefined &&
@@ -510,6 +521,33 @@ export function createConversation<C extends Context>(
             }
         }
     };
+}
+
+/**
+ * Handler for a context object that will be invoked when a condition fails.
+ */
+export type OtherwiseHandler<C extends Context> = (
+    ctx: C,
+) => unknown | Promise<unknown>;
+/**
+ * Options object with settings that determine how to handle a failing
+ * condition.
+ */
+export interface OtherwiseOptions<C extends Context> {
+    drop?: boolean;
+    otherwise?: OtherwiseHandler<C>;
+}
+/**
+ * Configuration for how to handle a failing condition, either a function or an
+ * options object.
+ */
+export type OtherwiseConfig<C extends Context> =
+    | OtherwiseHandler<C>
+    | OtherwiseOptions<C>;
+function toObj<C extends Context>(
+    otherwise?: OtherwiseConfig<C>,
+): OtherwiseOptions<C> {
+    return typeof otherwise === "function" ? { otherwise } : otherwise ?? {};
 }
 
 /**
@@ -800,24 +838,25 @@ export class ConversationHandle<C extends Context> {
      * function returns `true`, this method will return it.
      *
      * @param predicate Condition to fulfil
-     * @param otherwise Optional handler for discarded updates
+     * @param opts Optional config for discarded updates
      */
     async waitUntil<D extends C>(
         predicate: (ctx: C) => ctx is D,
-        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+        opts?: OtherwiseConfig<C>,
     ): Promise<D>;
     async waitUntil(
         predicate: (ctx: C) => boolean | Promise<boolean>,
-        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+        opts?: OtherwiseConfig<C>,
     ): Promise<C>;
     async waitUntil(
         predicate: (ctx: C) => boolean | Promise<boolean>,
-        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+        opts?: OtherwiseConfig<C>,
     ): Promise<C> {
+        const { otherwise, drop } = toObj(opts);
         const ctx = await this.wait();
         if (!await predicate(ctx)) {
             await otherwise?.(ctx);
-            await this.skip();
+            await this.skip({ drop });
         }
         return ctx;
     }
@@ -829,16 +868,13 @@ export class ConversationHandle<C extends Context> {
      * function returns `false`, this method will return it.
      *
      * @param predicate Condition not to fulfil
-     * @param otherwise Optional handler for discarded updates
+     * @param opts Optional config for discarded updates
      */
     async waitUnless(
         predicate: (ctx: C) => boolean | Promise<boolean>,
-        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+        opts?: OtherwiseConfig<C>,
     ): Promise<C> {
-        return await this.waitUntil(
-            async (ctx) => !await predicate(ctx),
-            otherwise,
-        );
+        return await this.waitUntil(async (ctx) => !await predicate(ctx), opts);
     }
 
     /**
@@ -847,13 +883,74 @@ export class ConversationHandle<C extends Context> {
      * filter query, the corresponding context object is returned.
      *
      * @param query The filter query to check
-     * @param otherwise Optional handler for discarded updates
+     * @param opts Optional config for discarded updates
      */
     async waitFor<Q extends FilterQuery>(
         query: Q | Q[],
-        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+        opts?: OtherwiseConfig<C>,
     ): Promise<Filter<C, Q>> {
-        return await this.waitUntil(Context.has.filterQuery(query), otherwise);
+        return await this.waitUntil(Context.has.filterQuery(query), opts);
+    }
+
+    /**
+     * Waits for a new message or channel post that contains the given text, or
+     * that contains text which matches the given regular expression. This uses
+     * the same logic as `bot.hears`.
+     *
+     * @param trigger The string or regex to match
+     * @param opts Optional config for discarded updates
+     */
+    async waitForHears(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseConfig<C>,
+    ): Promise<HearsContext<C>> {
+        return await this.waitUntil(Context.has.text(trigger), opts);
+    }
+
+    /**
+     * Waits for the specified command. This uses the same logic as
+     * `bot.command`.
+     *
+     * @param command The command to match
+     * @param opts Optional config for discarded updates
+     */
+    async waitForCommand<S extends string>(
+        command: MaybeArray<
+            StringWithSuggestions<S | "start" | "help" | "settings">
+        >,
+        opts?: OtherwiseConfig<C>,
+    ): Promise<CommandContext<C>> {
+        return await this.waitUntil(Context.has.command(command), opts);
+    }
+
+    /**
+     * Waits for an update which contains the given callback query, or for the
+     * callback query data to match the given regular expression. This uses the
+     * same logic as `bot.callbackQuery`.
+     *
+     * @param trigger The string or regex to match
+     * @param opts Optional config for discarded updates
+     */
+    async waitForCallbackQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseConfig<C>,
+    ): Promise<CallbackQueryContext<C>> {
+        return await this.waitUntil(Context.has.callbackQuery(trigger), opts);
+    }
+
+    /**
+     * Waits for an update which contains the given game query, or for the
+     * game query data to match the given regular expression. This uses the
+     * same logic as `bot.gameQuery`.
+     *
+     * @param trigger The string or regex to match
+     * @param opts Optional config for discarded updates
+     */
+    async waitForGameQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseConfig<C>,
+    ): Promise<GameQueryContext<C>> {
+        return await this.waitUntil(Context.has.gameQuery(trigger), opts);
     }
 
     /**
@@ -862,21 +959,40 @@ export class ConversationHandle<C extends Context> {
      * corresponding context object is returned.
      *
      * @param user The user to wait for
-     * @param otherwise Optional handler for discarded updates
+     * @param opts Optional config for discarded updates
      */
     async waitFrom(
         user: number | User,
-        otherwise?: (ctx: C) => unknown | Promise<unknown>,
+        opts?: OtherwiseConfig<C>,
     ): Promise<C & { from: User }> {
         const id = typeof user === "number" ? user : user.id;
         const predicate = (ctx: C): ctx is C & { from: User } =>
             ctx.from?.id === id;
-        return await this.waitUntil(predicate, otherwise);
+        return await this.waitUntil(predicate, opts);
     }
 
-    // TODO: implement command matching
-    // TODO: implement hears matching
-    // TODO: implement callback, game, and inline query matching
+    /**
+     * Waits for a new message or channel post which replies to the specified
+     * message. As soon as an update arrives that contains such a message or
+     * channel post, the corresponding context object is returned.
+     *
+     * @param message_id The message to which to reply
+     * @param opts Optional config for discarded updates
+     */
+    async waitForReplyTo(
+        message_id: number | { message_id: number },
+        opts?: OtherwiseConfig<C>,
+    ): Promise<Filter<C, "message" | "channel_post">> {
+        const id = typeof message_id === "number"
+            ? message_id
+            : message_id.message_id;
+        return await this.waitUntil(
+            (ctx): ctx is Filter<C, "message" | "channel_post"> =>
+                ctx.message?.reply_to_message?.message_id === id ||
+                ctx.channelPost?.reply_to_message?.message_id === id,
+            opts,
+        );
+    }
 
     /**
      * Utilities for building forms. Contains methods that let you wait for
@@ -887,9 +1003,9 @@ export class ConversationHandle<C extends Context> {
     /**
      * Skips handling the update that was received in the last `wait` call. Once
      * called, the conversation resets to the last `wait` call, as if the update
-     * had never been received. The control flow is passed on immediately, so
-     * that middleware downstream of the conversation can continue handling the
-     * update.
+     * had never been received. Unless `{ drop: true }` is passed, the control
+     * flow is passed on immediately, so that middleware downstream of the
+     * conversation can continue handling the update.
      *
      * Effectively, calling `await conversation.skip()` behaves as if this
      * conversation had not received the update at all.
@@ -897,7 +1013,8 @@ export class ConversationHandle<C extends Context> {
      * While the conversation rewinds its logs internally, it does not unsend
      * messages that you send between the calls to `wait` and `skip`.
      */
-    async skip() {
+    async skip(opts: { drop?: boolean } = {}) {
+        const { drop = false } = opts;
         // We decided not to handle this update, so we purge the last wait
         // operation again. It also contains the log of all operations performed
         // since that wait. Hence, we effectively completely rewind the
@@ -905,7 +1022,7 @@ export class ConversationHandle<C extends Context> {
         this._unlogWait();
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
-        this.rsr.resolve("skip");
+        this.rsr.resolve(drop ? "drop" : "skip");
         // Intercept function execution
         return await new Promise<never>(() => {}); // BOOM
     }
