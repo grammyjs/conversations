@@ -14,8 +14,8 @@ import {
     type Chat,
     Composer,
     type Context,
-    Middleware,
-    RawApi,
+    type Middleware,
+    type RawApi,
     session,
     type Update,
 } from "../src/deps.deno.ts";
