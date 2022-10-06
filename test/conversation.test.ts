@@ -786,26 +786,49 @@ describe("The conversation engine", () => {
             );
         });
     });
-    describe("provides conversation.log", () => {
+    describe("provides conversation.log and conversation.error", () => {
         it("which should print logs", async () => {
-            const log = stub(console, "log");
-            await testConversation((conversation) => conversation.log("debug"));
+            const log = spy(console, "log");
+            const error = spy(console, "error");
+            await testConversation((conversation) => {
+                conversation.log("debug");
+                conversation.error("err");
+            });
             assertEquals(log.calls.length, 1);
             assertEquals(log.calls[0].args, ["debug"]);
             log.restore();
+            assertEquals(error.calls.length, 1);
+            assertEquals(error.calls[0].args, ["err"]);
+            error.restore();
         });
         it("which should not print logs during replaying", async () => {
-            const log = stub(console, "log");
-            await testConversation(
-                async (conversation) => {
-                    conversation.log("debug");
-                    while (true) await conversation.wait();
-                },
-                [slashStart, slashStart],
-            );
+            const log = spy(console, "log");
+            const error = spy(console, "error");
+            await testConversation(async (conversation) => {
+                conversation.log("debug");
+                conversation.error("err");
+                while (true) await conversation.wait();
+            }, [slashStart, slashStart]);
             assertEquals(log.calls.length, 1);
             assertEquals(log.calls[0].args, ["debug"]);
             log.restore();
+            assertEquals(error.calls.length, 1);
+            assertEquals(error.calls[0].args, ["err"]);
+            error.restore();
+        });
+    });
+    describe("provides conversation.now", () => {
+        it("which should return stable time values", async () => {
+            let now = -1;
+            await testConversation(
+                async (conversation) => {
+                    const time = await conversation.now();
+                    if (now === -1) now = time;
+                    assertEquals(now, time);
+                    while (true) await conversation.wait();
+                },
+                [slashStart, slashStart, slashStart, slashStart],
+            );
         });
     });
 });
