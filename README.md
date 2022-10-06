@@ -11,7 +11,7 @@ Here is a quickstart for you, but the real docs are on this page: <https://gramm
 Run `npm i grammy @grammyjs/conversations` and paste the following code:
 
 ```ts
-import { Bot, Context, session } from "grammy";
+import { Bot, type Context, session } from "grammy";
 import {
     type Conversation,
     type ConversationFlavor,

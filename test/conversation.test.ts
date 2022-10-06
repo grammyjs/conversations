@@ -3,10 +3,12 @@ import { assert } from "https://deno.land/std@0.153.0/_util/assert.ts";
 import {
     assertEquals,
     assertRejects,
+    assertStringIncludes,
     assertThrows,
 } from "https://deno.land/std@0.156.0/testing/asserts.ts";
 import { describe, it } from "https://deno.land/std@0.156.0/testing/bdd.ts";
 import { spy } from "https://deno.land/std@0.156.0/testing/mock.ts";
+import { stub } from "https://deno.land/std@0.157.0/testing/mock.ts";
 import {
     type Conversation,
     type ConversationFlavor,
@@ -413,6 +415,49 @@ describe("The conversation engine", () => {
         assertEquals(func.calls[0].returned, 42);
         assertEquals(func.calls[1].args, [41]);
         assertEquals(func.calls[1].returned, 42);
+    });
+    it("should allow previously proxied functions to be missing on the context object", async () => {
+        const error = stub(console, "error");
+        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        let call = 0;
+        const func = spy((val: number) => val + 1);
+        const answer = await testConversation(
+            async (conversation, ctx) => { // call 0 [func]
+                ctx = await conversation.wait(); // call 1 [func]
+                assertEquals(ctx.update, slashStart);
+                const res = await conversation.external(() => {
+                    return (ctx as any).func(41);
+                });
+                ctx = await conversation.wait(); // call 2 [func]
+                await ctx.reply(msg.text);
+                ctx = await conversation.wait(); // call 3 []
+                ctx = await conversation.wait(); // call 4 []
+                return res;
+            },
+            [slashStart, slashStart, slashStart, slashStart],
+            [{ method: "sendMessage", result: msg }],
+            (ctx, next) => {
+                if (call++ < 3) {
+                    Object.defineProperty(ctx, "func", {
+                        enumerable: true,
+                        value: func,
+                    });
+                }
+                return next();
+            },
+        );
+        assertEquals(answer, 42);
+        assertEquals(func.calls.length, 1);
+        assertEquals(func.calls[0].args, [41]);
+        assertEquals(func.calls[0].returned, 42);
+        assertEquals(error.calls.length, 3 * 2); // 3 times restore, 2 times missing
+        assertEquals(error.calls[0].args.length, 1);
+        assert(typeof error.calls[0].args[0] === "string");
+        assertStringIncludes(
+            error.calls[0].args[0],
+            "Previously installed function 'func' is now missing",
+        );
+        error.restore();
     });
     describe("provides conversation.waitUntil", () => {
         it("which should be able to wait for a condition to hold", async () => {
