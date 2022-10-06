@@ -328,6 +328,7 @@ describe("The conversation engine", () => {
         );
         bot.api.config.use(api);
         async function conv(conversation: MyConversation, ctx: MyContext) {
+            ctx = await conversation.wait();
             await ctx.reply("inside");
             if (ctx.hasCommand("start")) {
                 await conversation.skip({ drop: true });
@@ -345,6 +346,7 @@ describe("The conversation engine", () => {
         bot.use(() => {
             throw "never";
         });
+        await bot.handleUpdate(slashStart);
         await bot.handleUpdate(slashStart);
         assertEquals(api.calls.length, 1);
         assertEquals(api.calls[0].args[1], "sendMessage");
