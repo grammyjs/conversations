@@ -55,15 +55,19 @@ export type ConversationFn<C extends Context> = (
  */
 export type ConversationFlavor<C extends Context | undefined = undefined> =
     & { conversation: ConversationControls }
-    & C extends Context ? C extends LazySessionFlavor<infer V> ? 
-            & Omit<C, "session">
-            & LazySessionFlavor<ConversationSessionData & V>
-    : 
-        & C
-        & SessionFlavor<ConversationSessionData>
-    : 
-        | SessionFlavor<ConversationSessionData>
-        | LazySessionFlavor<ConversationSessionData>;
+    & (
+        C extends Context ? 
+                & Omit<C, "session">
+                & (C extends LazySessionFlavor<infer V>
+                    ? LazySessionFlavor<ConversationSessionData & V>
+                    : C extends SessionFlavor<infer V>
+                        ? SessionFlavor<ConversationSessionData & V>
+                    : never)
+            : ( // TODO: remove additive flavor for 2.0
+                | SessionFlavor<ConversationSessionData>
+                | LazySessionFlavor<ConversationSessionData>
+            )
+    );
 
 interface Internals {
     /** Known conversation identifiers, used for collision checking */
