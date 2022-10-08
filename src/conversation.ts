@@ -55,7 +55,9 @@ export type ConversationFn<C extends Context> = (
  */
 export type ConversationFlavor<C extends Context | undefined = undefined> =
     & { conversation: ConversationControls }
-    & (C extends Context ? C extends LazySessionFlavor<infer V> ? 
+    & (C extends Context
+        // workaround for https://github.com/microsoft/TypeScript/issues/51111
+        ? C extends LazySessionFlavor<infer V> ? 
                 & Omit<C, "session">
                 & LazySessionFlavor<ConversationSessionData & V>
         : 
