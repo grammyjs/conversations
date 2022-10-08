@@ -53,11 +53,19 @@ export type ConversationFn<C extends Context> = (
  * panel `ctx.conversation` which e.g. allows entering a conversation. It also
  * adds some properties to the session which the conversation plugin needs.
  */
-export type ConversationFlavor =
+export type ConversationFlavor<C extends Context | undefined = undefined> =
     & { conversation: ConversationControls }
     & (
-        | SessionFlavor<ConversationSessionData>
-        | LazySessionFlavor<ConversationSessionData>
+        C extends Context ? 
+                & C
+                // deno-lint-ignore no-explicit-any
+                & (C extends { session: PromiseLike<any> }
+                    ? LazySessionFlavor<ConversationSessionData>
+                    : SessionFlavor<ConversationSessionData>)
+            : ( // TODO: remove additive flavor for 2.0
+                | SessionFlavor<ConversationSessionData>
+                | LazySessionFlavor<ConversationSessionData>
+            )
     );
 
 interface Internals {
