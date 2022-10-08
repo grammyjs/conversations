@@ -57,11 +57,12 @@ export type ConversationFlavor<C extends Context | undefined = undefined> =
     & { conversation: ConversationControls }
     & (
         C extends Context ? 
-                & C
-                // deno-lint-ignore no-explicit-any
-                & (C extends { session: PromiseLike<any> }
-                    ? LazySessionFlavor<ConversationSessionData>
-                    : SessionFlavor<ConversationSessionData>)
+                & Omit<C, "session">
+                & (C extends LazySessionFlavor<infer V>
+                    ? LazySessionFlavor<ConversationSessionData & V>
+                    : C extends SessionFlavor<infer V>
+                        ? SessionFlavor<ConversationSessionData & V>
+                    : never)
             : ( // TODO: remove additive flavor for 2.0
                 | SessionFlavor<ConversationSessionData>
                 | LazySessionFlavor<ConversationSessionData>
