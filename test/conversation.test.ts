@@ -23,7 +23,7 @@ import {
     BotError,
     Context,
     lazySession,
-    NextFunction,
+    type NextFunction,
     session,
     type SessionFlavor,
     type Update,
