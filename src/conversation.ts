@@ -53,12 +53,20 @@ export type ConversationFn<C extends Context> = (
  * panel `ctx.conversation` which e.g. allows entering a conversation. It also
  * adds some properties to the session which the conversation plugin needs.
  */
-export type ConversationFlavor =
+export type ConversationFlavor<C extends Context | undefined = undefined> =
     & { conversation: ConversationControls }
-    & (
-        | SessionFlavor<ConversationSessionData>
-        | LazySessionFlavor<ConversationSessionData>
-    );
+    & (C extends Context
+        // workaround for https://github.com/microsoft/TypeScript/issues/51111
+        ? C extends LazySessionFlavor<infer V> ? 
+                & Omit<C, "session">
+                & LazySessionFlavor<ConversationSessionData & V>
+        : 
+            & C
+            & SessionFlavor<ConversationSessionData>
+        // TODO: remove additive flavor for 2.0
+        : 
+            | SessionFlavor<ConversationSessionData>
+            | LazySessionFlavor<ConversationSessionData>);
 
 interface Internals {
     /** Known conversation identifiers, used for collision checking */
