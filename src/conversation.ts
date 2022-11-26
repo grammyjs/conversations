@@ -22,13 +22,7 @@ import {
     type User,
 } from "./deps.deno.ts";
 import { ConversationForm } from "./form.ts";
-import {
-    clone,
-    ident,
-    IS_NOT_INTRINSIC,
-    type Resolver,
-    resolver,
-} from "./utils.ts";
+import { ident, IS_NOT_INTRINSIC, type Resolver, resolver } from "./utils.ts";
 type MaybeArray<T> = T | T[];
 // deno-lint-ignore ban-types
 type StringWithSuggestions<S extends string> = (string & {}) | S;
@@ -345,7 +339,7 @@ function conversationRunner<C extends Context>(
             Object.entries(ctx)
                 // Do not copy over intrinsic properties
                 .filter(([k]) => IS_NOT_INTRINSIC(k))
-                .map(([k, v]) => [k, v, clone(v)])
+                .map(([k, v]) => [k, v, delistify(listify(v))])
                 // Remember functions
                 .filter(([k, v, c]) => {
                     if (v !== undefined && c === undefined) {

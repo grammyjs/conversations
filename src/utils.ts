@@ -3,18 +3,6 @@ export function ident<T>(arg: T) {
     return arg;
 }
 
-/**
- * Performs a structured clone, ignoring non-enumerable properties such as
- * functions.
- */
-export function clone<T>(arg: T) {
-    // TODO: replace ugly hack with better cloning
-    if (arg === undefined) return undefined;
-    const string = JSON.stringify(arg);
-    if (!string) return undefined;
-    return JSON.parse(string);
-}
-
 // Define which context properties are intrinsic to grammY or this plugin and
 // should not be stored in the op logs
 const INTRINSIC_CONTEXT_PROPS = new Set([
