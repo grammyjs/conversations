@@ -813,7 +813,9 @@ export class ConversationHandle<C extends Context> {
             const ctx = await this._replayWait();
             const timeout = opts.maxMilliseconds;
             if (
-                this.data.last !== undefined && timeout !== undefined &&
+                !this._isReplaying &&
+                this.data.last !== undefined &&
+                timeout !== undefined &&
                 this.data.last + timeout < Date.now()
             ) {
                 // conversation expired, leave it
