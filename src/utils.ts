@@ -1,3 +1,5 @@
+import { delistify, listify } from "./deps.deno.ts";
+
 /** Identity function */
 export function ident<T>(arg: T) {
     return arg;
@@ -9,10 +11,9 @@ export function ident<T>(arg: T) {
  */
 export function clone<T>(arg: T) {
     // TODO: replace ugly hack with better cloning
-    if (arg === undefined) return undefined;
-    const string = JSON.stringify(arg);
-    if (!string) return undefined;
-    return JSON.parse(string);
+    const list = listify(arg);
+    if (Array.isArray(list) && list.length === 0) return undefined;
+    return delistify(list);
 }
 
 // Define which context properties are intrinsic to grammY or this plugin and
