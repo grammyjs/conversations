@@ -92,13 +92,14 @@ describe("createConversation", () => {
         bot.use(
             session({ initial: () => ({}) }),
             conversations(),
-            createConversation(() => {
+            createConversation(async (c) => {
+                await c.wait();
                 throw "never";
-            }, { id: "foo", millisecondsToWait: -1 }),
-            createConversation((c) => {
-                assertEquals(c.millisecondsToWait, 100);
+            }, { id: "foo", maxMillisecondsToWait: -1 }),
+            createConversation(async (c) => {
+                await c.wait();
                 throw "always";
-            }, { id: "bar", millisecondsToWait: 100 }),
+            }, { id: "bar", maxMillisecondsToWait: 100 }),
         );
         bot.hears("foo", (ctx) => ctx.conversation.enter("foo"));
         bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
@@ -106,11 +107,15 @@ describe("createConversation", () => {
             update_id: 0,
             message: { message_id, chat, date, text: "foo" },
         });
+        await bot.handleUpdate({
+            update_id: 0,
+            message: { message_id, chat, date, text: "bar" },
+        });
         await assertRejects(
             () =>
                 bot.handleUpdate({
                     update_id: 0,
-                    message: { message_id, chat, date, text: "bar" },
+                    message: { message_id, chat, date, text: "update" },
                 }),
             BotError,
             "always",
@@ -164,23 +169,18 @@ describe("ctx.conversation", () => {
             const bot = new Bot<MyContext>("dummy", { botInfo });
 
             function foo(conversation: MyConversation) {
-                assertEquals(conversation.millisecondsToWait, 100);
+                assertEquals((conversation as any).timeout, 100);
             }
             function bar(conversation: MyConversation) {
-                assertEquals(conversation.millisecondsToWait, 500);
+                assertEquals((conversation as any).timeout, 500);
             }
             bot.use(
                 session({ initial: () => ({}) }),
                 conversations(),
-                createConversation(foo, { millisecondsToWait: 500 }),
-                createConversation(bar, { millisecondsToWait: 500 }),
+                createConversation(foo, { maxMillisecondsToWait: 500 }),
+                createConversation(bar, { maxMillisecondsToWait: 500 }),
             );
 
-            bot.hears(
-                "foo",
-                (ctx) =>
-                    ctx.conversation.enter("foo", { millisecondsToWait: 100 }),
-            );
             bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
             await bot.handleUpdate({
                 update_id: 0,
@@ -353,11 +353,52 @@ describe("The conversation engine", () => {
             ],
         );
     });
+    it("should be able to wait with timeouts", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        const api = spy((
+            _prev,
+            _method: string,
+            _payload: Record<string, unknown>,
+        ) => Promise.resolve({ ok: true as const, result: true as any }));
+        bot.api.config.use(api);
+        async function conv(conversation: MyConversation, ctx: MyContext) {
+            await ctx.reply("inside");
+            await conversation.wait({ maxMilliseconds: 100 });
+            await ctx.reply("between");
+            await conversation.wait({ maxMilliseconds: -1 });
+            throw "never";
+        }
+        bot.use(
+            session({ initial: () => ({}) }),
+            conversations(),
+            createConversation(conv),
+        );
+        bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+        bot.use((ctx) => ctx.reply("outside"));
+        await bot.handleUpdate(slashStart);
+        assertEquals(api.calls.length, 1);
+        assertEquals(api.calls[0].args[1], "sendMessage");
+        assertEquals(api.calls[0].args[2].text, "inside");
+        const up = {
+            update_id: 42,
+            message: { message_id, chat, date, text: "msg" },
+        };
+        await bot.handleUpdate(up);
+        assertEquals(api.calls.length, 2);
+        assertEquals(api.calls[1].args[1], "sendMessage");
+        assertEquals(api.calls[1].args[2].text, "between");
+        await bot.handleUpdate(up);
+        assertEquals(api.calls.length, 3);
+        assertEquals(api.calls[2].args[1], "sendMessage");
+        assertEquals(api.calls[2].args[2].text, "outside");
+    });
     it("should be able to skip updates", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
-        const api = spy((_prev, _method: string) =>
-            Promise.resolve({ ok: true as const, result: true as any })
-        );
+        const api = spy((
+            _prev,
+            _method: string,
+            _payload: Record<string, unknown>,
+        ) => Promise.resolve({ ok: true as const, result: true as any }));
         bot.api.config.use(api);
         async function conv(conversation: MyConversation, ctx: MyContext) {
             await ctx.reply("inside");
@@ -374,13 +415,16 @@ describe("The conversation engine", () => {
         await bot.handleUpdate(slashStart);
         assertEquals(api.calls.length, 1);
         assertEquals(api.calls[0].args[1], "sendMessage");
+        assertEquals(api.calls[0].args[2].text, "inside");
         await bot.handleUpdate({
             update_id: 42,
             message: { message_id, chat, date, text: "msg" },
         });
         assertEquals(api.calls.length, 3);
         assertEquals(api.calls[1].args[1], "sendMessage");
+        assertEquals(api.calls[1].args[2].text, "inside");
         assertEquals(api.calls[2].args[1], "sendMessage");
+        assertEquals(api.calls[2].args[2].text, "outside");
     });
     it("should be able to drop skipped updates", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
@@ -461,17 +505,6 @@ describe("The conversation engine", () => {
             () => bot.handleUpdate(slashStart),
             BotError,
             "Replay stack exhausted",
-        );
-    });
-    it("should respect wait timeouts", async () => {
-        await testConversation(
-            async (conversation: MyConversation) => {
-                await conversation.wait();
-                conversation.millisecondsToWait = -1;
-                await conversation.wait();
-                throw "never";
-            },
-            [slashStart, slashStart],
         );
     });
     it("should protect against invalid unlogs", async () => {
@@ -1145,8 +1178,9 @@ describe("The conversation engine", () => {
                     new Api(""),
                     botInfo,
                 ) as MyContext,
-                { log: { u: [] }, crt: 0 },
+                { log: { u: [] }, last: 0 },
                 resolver(),
+                undefined,
             );
             assertThrows(() => handle.session, "No context");
             assertThrows(() => (handle.session = undefined), "No context");
