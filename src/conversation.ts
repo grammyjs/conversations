@@ -1,4 +1,3 @@
-import { GLOBAL_CONSTRUCTOR_MAP } from "https://deno.land/x/oson@1.0.0/constructors.ts";
 import {
     type ApiResponse,
     type CallbackQueryContext,
@@ -9,6 +8,7 @@ import {
     type Filter,
     type FilterQuery,
     type GameQueryContext,
+    GLOBAL_CONSTRUCTOR_MAP,
     GrammyError,
     type HearsContext,
     HttpError,
