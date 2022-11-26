@@ -4,11 +4,13 @@ import {
     type CommandContext,
     Composer,
     Context,
+    delistify,
     type Filter,
     type FilterQuery,
     type GameQueryContext,
     type HearsContext,
     type LazySessionFlavor,
+    listify,
     type Middleware,
     type MiddlewareFn,
     type RawApi,
@@ -73,6 +75,8 @@ export type ConversationFlavor<C extends Context | undefined = undefined> =
 interface Internals {
     /** Known conversation identifiers, used for collision checking */
     ids: Set<string>;
+    /** Session data supplier, used to persist conversation state */
+    session: () => Promise<ConversationSessionData>;
 }
 
 /**
@@ -87,11 +91,13 @@ const internal = Symbol("conversations");
  */
 class ConversationControls {
     /** List of all conversations to be started */
-    readonly [internal]: Internals = { ids: new Set() };
+    readonly [internal]: Internals;
 
     constructor(
-        private readonly session: () => Promise<ConversationSessionData>,
-    ) {}
+        session: () => Promise<ConversationSessionData>,
+    ) {
+        this[internal] = { ids: new Set(), session };
+    }
 
     /**
      * Returns a map of the identifiers of currently active conversations to the
@@ -102,7 +108,7 @@ class ConversationControls {
      */
     async active() {
         return Object.fromEntries(
-            Object.entries((await this.session()).conversation ?? {})
+            Object.entries((await this[internal].session()).conversation ?? {})
                 .map(([id, conversations]) => [id, conversations.length]),
         );
     }
@@ -161,7 +167,7 @@ class ConversationControls {
      * or throw in order to leave a conversation.
      */
     public async exit(id?: string) {
-        const session = await this.session();
+        const session = await this[internal].session();
         if (session.conversation === undefined) return;
         if (id === undefined) {
             // Simply clear all conversation data
@@ -352,11 +358,30 @@ export function conversations<C extends Context>(): MiddlewareFn<
         if (!("session" in ctx)) {
             throw new Error("Cannot use conversations without session!");
         }
-        ctx.conversation ??= new ConversationControls(() =>
+        let transformed = false;
+        ctx.conversation ??= new ConversationControls(async () => {
             // Access session lazily
-            Promise.resolve(ctx.session)
-        );
+            const session = await ctx.session;
+            if (!transformed) {
+                transformed = true;
+                if (
+                    typeof session.conversation === "number" ||
+                    (typeof session.conversation === "object" &&
+                        Array.isArray(session.conversation))
+                ) {
+                    session.conversation = delistify(session.conversation);
+                }
+            }
+            console.log("accessed!", transformed);
+            return session;
+        });
         await next();
+        console.log("ctx.session accessed:", transformed);
+        if (transformed) {
+            const session = await ctx.session;
+            // deno-lint-ignore no-explicit-any
+            session.conversation = listify(session.conversation) as any;
+        }
     };
 }
 
@@ -422,7 +447,7 @@ export function createConversation<C extends Context>(
                 await oldEnter(enterId, opts);
                 return;
             }
-            const session = await ctx.session;
+            const session = await ctx.conversation[internal].session();
             session.conversation ??= {};
             const entry: ActiveConversation = { log: { u: [] } };
             const append = [entry];
@@ -441,7 +466,7 @@ export function createConversation<C extends Context>(
             }
         };
 
-        const session = await ctx.session;
+        const session = await ctx.conversation[internal].session();
         try {
             // Run all existing conversations with our identifier
             let op: ResolveOps = "skip";
