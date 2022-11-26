@@ -243,13 +243,13 @@ class ConversationControls {
         if (session.conversation === undefined) return;
         if (id === undefined) {
             // Simply clear all conversation data
-            delete session.conversation;
+            session.conversation = undefined;
         } else {
             // Strip out specified conversations from active ones
             delete session.conversation[id];
             // Do not store empty object
             if (Object.keys(session.conversation).length === 0) {
-                delete session.conversation;
+                session.conversation = undefined;
             }
         }
     }
@@ -452,11 +452,13 @@ export function conversations<C extends Context>(): MiddlewareFn<
         await next();
         if (transformed) {
             const session = await ctx.session;
-            session.conversation = listify(
-                session.conversation,
-                KNOWN_TYPES,
-                // deno-lint-ignore no-explicit-any
-            ) as any;
+            if (session.conversation !== undefined) {
+                session.conversation = listify(
+                    session.conversation,
+                    KNOWN_TYPES,
+                    // deno-lint-ignore no-explicit-any
+                ) as any;
+            }
         }
     };
 }
@@ -566,7 +568,7 @@ export function createConversation<C extends Context>(
                 session.conversation !== undefined &&
                 Object.keys(session.conversation).length === 0
             ) {
-                delete session.conversation;
+                session.conversation = undefined;
             }
         }
     };
