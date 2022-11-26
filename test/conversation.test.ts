@@ -3,7 +3,9 @@ import {
     assert,
     assertEquals,
     assertFalse,
+    assertInstanceOf,
     assertRejects,
+    assertStringIncludes,
     assertThrows,
 } from "https://deno.land/std@0.166.0/testing/asserts.ts";
 import { describe, it } from "https://deno.land/std@0.166.0/testing/bdd.ts";
@@ -17,9 +19,11 @@ import {
 } from "../src/conversation.ts";
 import {
     Api,
+    ApiError,
     Bot,
     BotError,
     Context,
+    GrammyError,
     lazySession,
     type NextFunction,
     session,
@@ -289,6 +293,36 @@ describe("The conversation engine", () => {
                 { method: "sendMessage", result: msg },
                 { method: "sendMessage", result: msg },
                 { method: "sendMessage", result: msg },
+                { method: "sendMessage", result: msg },
+            ],
+        );
+    });
+    it("should replay errors in API calls", async () => {
+        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const err: ApiError = {
+            ok: false,
+            description: "nope",
+            error_code: 42,
+        };
+        await testConversation(
+            async (conversation, ctx) => {
+                ctx = await conversation.wait();
+                assertEquals(ctx.update, slashStart);
+                const message = await ctx.reply(msg.text);
+                assertEquals(message, msg);
+                ctx = await conversation.wait();
+                assertEquals(ctx.update, slashStart);
+                try {
+                    await ctx.reply(msg.text);
+                    throw "never";
+                } catch (err) {
+                    assertInstanceOf(err, GrammyError);
+                    assertStringIncludes(err.message, "42: nope");
+                }
+            },
+            [slashStart, slashStart, slashStart],
+            [
+                { method: "sendMessage", result: err },
                 { method: "sendMessage", result: msg },
             ],
         );
