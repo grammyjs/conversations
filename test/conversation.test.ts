@@ -125,6 +125,7 @@ describe("createConversation", () => {
             BotError,
             "always",
         );
+    });
     it("should work with multi sessions", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
         let works = false;
