@@ -92,6 +92,23 @@ describe("createConversation", () => {
             "Duplicate conversation identifier 'one'",
         );
     });
+    it("should work with multi sessions", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        let works = false;
+        bot.use(
+            session({
+                type: "multi",
+                conversation: {},
+            }),
+            conversations(),
+            createConversation(() => {
+                works = true;
+            }, "conv"),
+        );
+        bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+        await bot.handleUpdate(slashStart);
+        assert(works);
+    });
 });
 
 describe("ctx.conversation", () => {
