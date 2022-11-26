@@ -87,26 +87,67 @@ const e = KNOWN_TYPES.get(Error.name);
 KNOWN_TYPES.delete(Error.name);
 KNOWN_TYPES.set(GrammyError.name, {
     instance: GrammyError as unknown as new () => GrammyError,
-    from: (err: GrammyError) => [
-        err.message,
-        err.error_code,
-        err.description,
-        err.parameters,
-        err.method,
-        err.payload,
-    ],
-    create: ([message, error_code, description, parameters, method, payload]) =>
-        new GrammyError(
+    from: (err: GrammyError) => {
+        const res: unknown[] = [
+            err.message,
+            err.error_code,
+            err.description,
+            err.parameters,
+            err.method,
+            err.payload,
+        ];
+        if (err.stack !== undefined) res.push(err.stack);
+        if (err.cause !== undefined) {
+            if (err.stack === undefined) res.push(undefined);
+            res.push(err.cause);
+        }
+        return res;
+    },
+    create: (
+        [
+            message,
+            error_code,
+            description,
+            parameters,
+            method,
+            payload,
+            stack,
+            cause,
+        ],
+    ) => {
+        const err = new GrammyError(
             message,
             { ok: false, error_code, description, parameters },
             method,
             payload,
-        ),
+        );
+        if (stack === undefined) delete err.stack;
+        else {
+            console.log("setting stack");
+            err.stack = stack;
+        }
+        if (cause !== undefined) err.cause = cause;
+        return err;
+    },
 });
 KNOWN_TYPES.set(HttpError.name, {
     instance: HttpError as unknown as new () => HttpError,
-    from: (err: HttpError) => [err.message, err.error],
-    create: ([message, error]) => new HttpError(message, error),
+    from: (err: HttpError) => {
+        const res: unknown[] = [err.message, err.error];
+        if (err.stack !== undefined) res.push(err.stack);
+        if (err.cause !== undefined) {
+            if (err.stack === undefined) res.push(undefined);
+            res.push(err.cause);
+        }
+        return res;
+    },
+    create: ([message, error, stack, cause]) => {
+        const err = new HttpError(message, error);
+        if (stack === undefined) delete err.stack;
+        else err.stack = stack;
+        if (cause !== undefined) err.cause = cause;
+        return err;
+    },
 });
 if (e !== undefined) KNOWN_TYPES.set(Error.name, e);
 
@@ -400,7 +441,10 @@ export function conversations<C extends Context>(): MiddlewareFn<
                     (typeof session.conversation === "object" &&
                         Array.isArray(session.conversation))
                 ) {
-                    session.conversation = delistify(session.conversation);
+                    session.conversation = delistify(
+                        session.conversation,
+                        KNOWN_TYPES,
+                    );
                 }
             }
             return session;
@@ -408,8 +452,11 @@ export function conversations<C extends Context>(): MiddlewareFn<
         await next();
         if (transformed) {
             const session = await ctx.session;
-            // deno-lint-ignore no-explicit-any
-            session.conversation = listify(session.conversation) as any;
+            session.conversation = listify(
+                session.conversation,
+                KNOWN_TYPES,
+                // deno-lint-ignore no-explicit-any
+            ) as any;
         }
     };
 }
