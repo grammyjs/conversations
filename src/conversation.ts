@@ -122,10 +122,7 @@ KNOWN_TYPES.set(GrammyError.name, {
             payload,
         );
         if (stack === undefined) delete err.stack;
-        else {
-            console.log("setting stack");
-            err.stack = stack;
-        }
+        else err.stack = stack;
         if (cause !== undefined) err.cause = cause;
         return err;
     },
