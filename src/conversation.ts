@@ -2,12 +2,14 @@ import {
     type ApiResponse,
     type CallbackQueryContext,
     type CommandContext,
+    Composer,
     Context,
     type Filter,
     type FilterQuery,
     type GameQueryContext,
     type HearsContext,
     type LazySessionFlavor,
+    type Middleware,
     type MiddlewareFn,
     type RawApi,
     type SessionFlavor,
@@ -322,7 +324,7 @@ function conversationRunner<C extends Context>(
         handle._logWait(waitOp()); // appends to end of log
         // Now, we invoke the conversation builder function. We start by
         // replaying the initial context object manually.
-        const initialContext = handle._replayWait(); // retrieves from start of log
+        const initialContext = await handle._replayWait(); // retrieves from start of log
         // Call the target builder function supplied by the user, but don't
         // blindly await it because when `wait` is called somewhere inside,
         // execution is aborted. The `Promise.race` intercepts this again and
@@ -631,6 +633,7 @@ export class ConversationHandle<C extends Context> {
     private replayIndex: ReplayIndex = { wait: 0 };
     private currentCtx?: C;
     private active = true;
+    private mw = new Composer<C>();
 
     constructor(
         private readonly ctx: C,
@@ -671,7 +674,7 @@ export class ConversationHandle<C extends Context> {
      * Internal method, replays a wait operation and advances the replay cursor.
      * Do not use unless you know exactly what you are doing.
      */
-    _replayWait(): C {
+    async _replayWait(): Promise<C> {
         if (!this._isReplaying) {
             throw new Error(
                 "Replay stack exhausted, you may not call this method!",
@@ -679,27 +682,28 @@ export class ConversationHandle<C extends Context> {
         }
         const { u, x, f = [] } = this.data.log.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
-        // Return original context if we're about to resume execution
-        if (!this._isReplaying) return this.currentCtx = this.ctx;
-        // Create fake context, and restore all enumerable properties
-        const ctx = Object.assign(
-            new Context(u, this.ctx.api, this.ctx.me),
-            x,
-        ) as C;
-        // Copy over functions which we could not store
-        f.forEach((key) => {
-            // deno-lint-ignore no-explicit-any
-            const current = (this.ctx as any)[key];
-            if (typeof current !== "function") {
-                console.error(
-                    `WARNING: grammY conversations: Previously installed function '${key}' is now missing on context object! Is the middleware order incorrect?`,
-                );
-                return;
-            }
-            // deno-lint-ignore no-explicit-any
-            (ctx as any)[key] = current.bind(this.ctx);
-        });
+        let ctx: C;
+        if (!this._isReplaying) {
+            // Return original context if we're about to resume execution
+            ctx = this.ctx;
+        } else {
+            // Create fake context, and restore all enumerable properties
+            ctx = Object.assign(
+                new Context(u, this.ctx.api, this.ctx.me),
+                x,
+            ) as C;
+            // Copy over functions which we could not store
+            f.forEach((key) => {
+                // deno-lint-ignore no-explicit-any
+                const current = (this.ctx as any)[key];
+                if (typeof current === "function") {
+                    // deno-lint-ignore no-explicit-any
+                    (ctx as any)[key] = current.bind(this.ctx);
+                }
+            });
+        }
         this.currentCtx = ctx;
+        await runAsLeaf(ctx, this.mw);
         return ctx;
     }
 
@@ -829,7 +833,7 @@ export class ConversationHandle<C extends Context> {
      */
     async wait(): Promise<C> {
         // If this is an old wait, simply return the old context object
-        if (this._isReplaying) return this._replayWait();
+        if (this._isReplaying) return await this._replayWait();
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
         this.rsr.resolve("wait");
@@ -1201,4 +1205,21 @@ export class ConversationHandle<C extends Context> {
     now() {
         return this.external({ task: () => Date.now() });
     }
+    async run(...middleware: Middleware<C>[]) {
+        if (this.currentCtx === undefined) throw new Error("No context!");
+        await runAsLeaf(this.currentCtx, ...middleware);
+        this.mw.use(async (ctx, next) => {
+            if (await runAsLeaf(ctx, ...middleware)) await next();
+        });
+    }
+}
+
+async function runAsLeaf<C extends Context>(
+    ctx: C,
+    ...middleware: Middleware<C>[]
+) {
+    const mw = new Composer(...middleware).middleware();
+    let nextCalled = false;
+    await mw(ctx, () => (nextCalled = true, Promise.resolve()));
+    return nextCalled;
 }

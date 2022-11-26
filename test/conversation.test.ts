@@ -1,14 +1,13 @@
 // deno-lint-ignore-file no-explicit-any
-import { assert } from "https://deno.land/std@0.153.0/_util/assert.ts";
 import {
+    assert,
     assertEquals,
+    assertFalse,
     assertRejects,
-    assertStringIncludes,
     assertThrows,
-} from "https://deno.land/std@0.156.0/testing/asserts.ts";
-import { describe, it } from "https://deno.land/std@0.156.0/testing/bdd.ts";
-import { spy } from "https://deno.land/std@0.156.0/testing/mock.ts";
-import { stub } from "https://deno.land/std@0.157.0/testing/mock.ts";
+} from "https://deno.land/std@0.166.0/testing/asserts.ts";
+import { describe, it } from "https://deno.land/std@0.166.0/testing/bdd.ts";
+import { spy, stub } from "https://deno.land/std@0.166.0/testing/mock.ts";
 import {
     type Conversation,
     type ConversationFlavor,
@@ -22,8 +21,10 @@ import {
     BotError,
     Context,
     lazySession,
+    type NextFunction,
     session,
-    SessionFlavor,
+    type SessionFlavor,
+    type Update,
 } from "../src/deps.deno.ts";
 import { resolver } from "../src/utils.ts";
 import {
@@ -447,8 +448,8 @@ describe("The conversation engine", () => {
     });
     it("should protect against invalid wait replays", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
-        function conv(conversation: MyConversation) {
-            conversation._replayWait();
+        async function conv(conversation: MyConversation) {
+            await conversation._replayWait();
         }
         bot.use(
             session({ initial: () => ({}) }),
@@ -554,7 +555,6 @@ describe("The conversation engine", () => {
         assertEquals(func.calls[1].returned, 42);
     });
     it("should allow previously proxied functions to be missing on the context object", async () => {
-        const error = stub(console, "error");
         const msg = { message_id: 0, chat, date, text: "Hi there!" };
         let call = 0;
         const func = spy((val: number) => val + 1);
@@ -587,14 +587,6 @@ describe("The conversation engine", () => {
         assertEquals(func.calls.length, 1);
         assertEquals(func.calls[0].args, [41]);
         assertEquals(func.calls[0].returned, 42);
-        assertEquals(error.calls.length, 3 * 2); // 3 times restore, 2 times missing
-        assertEquals(error.calls[0].args.length, 1);
-        assert(typeof error.calls[0].args[0] === "string");
-        assertStringIncludes(
-            error.calls[0].args[0],
-            "Previously installed function 'func' is now missing",
-        );
-        error.restore();
     });
     describe("provides conversation.waitUntil", () => {
         it("which should be able to wait for a condition to hold", async () => {
@@ -1233,8 +1225,8 @@ describe("The conversation engine", () => {
     });
     describe("provides conversation.log and conversation.error", () => {
         it("which should print logs", async () => {
-            const log = spy(console, "log");
-            const error = spy(console, "error");
+            const log = stub(console, "log");
+            const error = stub(console, "error");
             await testConversation((conversation) => {
                 conversation.log("debug");
                 conversation.error("err");
@@ -1247,8 +1239,8 @@ describe("The conversation engine", () => {
             error.restore();
         });
         it("which should not print logs during replaying", async () => {
-            const log = spy(console, "log");
-            const error = spy(console, "error");
+            const log = stub(console, "log");
+            const error = stub(console, "error");
             await testConversation(async (conversation) => {
                 conversation.log("debug");
                 conversation.error("err");
@@ -1274,6 +1266,138 @@ describe("The conversation engine", () => {
                 },
                 [slashStart, slashStart, slashStart, slashStart],
             );
+        });
+    });
+    describe("provides conversation.run", () => {
+        it("which should run middleware", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation, ctx) => {
+                        await conversation.run((c) => {
+                            assertEquals(ctx, c);
+                            assertEquals(c.update, slashStart);
+                        });
+                        return 42;
+                    },
+                    [slashStart],
+                ),
+            );
+        });
+        it("which should run middleware before a wait", async () => {
+            let seq = "";
+            const mw = spy((
+                ctx: MyContext,
+                next: NextFunction,
+            ) => (seq += ctx.msg?.text ?? "m", next()));
+            const msg: Update = {
+                update_id: 10,
+                message: { message_id, chat, date, text: "t" },
+            };
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        seq += "a";
+                        await conversation.run(mw);
+                        seq += "b";
+                        await conversation.wait();
+                        seq += "c";
+                        return 42;
+                    },
+                    [msg],
+                ),
+            );
+            assertEquals(seq, "a/startba/startbtc");
+            assertEquals(mw.calls.length, 3);
+            assertEquals(mw.calls[0].args[0].update, slashStart);
+            assertEquals(mw.calls[1].args[0].update, slashStart);
+            assertEquals(mw.calls[2].args[0].update, msg);
+        });
+        it("which should pass all future context objects through the already installed middleware", async () => {
+            const p: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "p" },
+            };
+            const q: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "q" },
+            };
+            const r: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "r" },
+            };
+            let seq = "";
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        await conversation.external(() => seq += "a");
+                        await conversation.wait(); // p
+                        await conversation.external(() => seq += "b");
+                        await conversation.run(async (ctx, next) => {
+                            seq += ctx.msg?.text ?? "x";
+                            seq += "1";
+                            await next();
+                            seq += "2";
+                        });
+                        await conversation.external(() => seq += "c");
+                        await conversation.wait(); // q
+                        await conversation.external(() => seq += "d");
+                        await conversation.run(async (ctx, next) => {
+                            seq += ctx.msg?.text ?? "y";
+                            seq += "3";
+                            await next();
+                            seq += "4";
+                        });
+                        await conversation.external(() => seq += "e");
+                        await conversation.run(async (ctx, next) => {
+                            seq += ctx.msg?.text ?? "z";
+                            seq += "5";
+                            await next();
+                            seq += "6";
+                        });
+                        await conversation.external(() => seq += "f");
+                        await conversation.wait(); // r
+                        await conversation.external(() => seq += "g");
+                        return 42;
+                    },
+                    [p, q, r],
+                    [],
+                    (
+                        ctx,
+                        next,
+                    ) => (seq += "|" + (ctx.msg?.text ?? "0"), next()),
+                ),
+            );
+            assertEquals(
+                seq,
+                "|/starta|pbp12c|qp12q12dq34eq56f|rp12q12q34q56r12r34r56g", // read closely
+            );
+        });
+        it("which should allow middleware to consume updates", async () => {
+            const p: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "p" },
+            };
+            const q: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "q" },
+            };
+            const r: Update = {
+                update_id: 43,
+                message: { message_id, chat, date, text: "r" },
+            };
+            async function conv(conversation: MyConversation, ctx: MyContext) {
+                await conversation.run(async (ctx, next) => {
+                    if (!ctx.hasText("q")) await next();
+                });
+                assertFalse(ctx.hasText("q"));
+                return 42;
+            }
+            for (const u of [slashStart, p, q, r]) {
+                assertEquals(42, await testConversation(conv, u));
+            }
         });
     });
 });
