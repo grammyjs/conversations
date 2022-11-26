@@ -388,7 +388,7 @@ describe("The conversation engine", () => {
             ],
         );
     });
-    it("should be able to skip updates", async () => {
+    it("should be able to wait with timeouts", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
         const api = spy((
             _prev,
