@@ -460,8 +460,7 @@ export function createConversation<C extends Context>(
                     conversations.splice(i, 1);
                     throw e;
                 }
-                if (op.exit) conversations.splice(i, 1);
-                if (op.consumed) i--;
+                if (op.exit) conversations.splice(i--, 1);
             }
             return op;
         }
