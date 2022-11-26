@@ -626,14 +626,10 @@ export class ConversationHandle<C extends Context> {
             f.forEach((key) => {
                 // deno-lint-ignore no-explicit-any
                 const current = (this.ctx as any)[key];
-                if (typeof current !== "function") {
-                    console.error(
-                        `WARNING: grammY conversations: Previously installed function '${key}' is now missing on context object! Is the middleware order incorrect?`,
-                    );
-                    return;
+                if (typeof current === "function") {
+                    // deno-lint-ignore no-explicit-any
+                    (ctx as any)[key] = current.bind(this.ctx);
                 }
-                // deno-lint-ignore no-explicit-any
-                (ctx as any)[key] = current.bind(this.ctx);
             });
         }
         this.currentCtx = ctx;
