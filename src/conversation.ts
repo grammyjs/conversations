@@ -811,9 +811,10 @@ export class ConversationHandle<C extends Context> {
         // If this is an old wait, simply return the old context object
         if (this._isReplaying) {
             const ctx = await this._replayWait();
+            // Exit the conversation if the wait expired
             const timeout = opts.maxMilliseconds;
             if (
-                !this._isReplaying &&
+                !this._isReplaying && // limit to the current wait
                 this.data.last !== undefined &&
                 timeout !== undefined &&
                 this.data.last + timeout < Date.now()
