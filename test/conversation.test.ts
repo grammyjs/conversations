@@ -7,7 +7,7 @@ import {
     assertThrows,
 } from "https://deno.land/std@0.166.0/testing/asserts.ts";
 import { describe, it } from "https://deno.land/std@0.166.0/testing/bdd.ts";
-import { spy } from "https://deno.land/std@0.166.0/testing/mock.ts";
+import { spy, stub } from "https://deno.land/std@0.166.0/testing/mock.ts";
 import {
     type Conversation,
     type ConversationFlavor,
@@ -1154,8 +1154,8 @@ describe("The conversation engine", () => {
     });
     describe("provides conversation.log and conversation.error", () => {
         it("which should print logs", async () => {
-            const log = spy(console, "log");
-            const error = spy(console, "error");
+            const log = stub(console, "log");
+            const error = stub(console, "error");
             await testConversation((conversation) => {
                 conversation.log("debug");
                 conversation.error("err");
@@ -1168,8 +1168,8 @@ describe("The conversation engine", () => {
             error.restore();
         });
         it("which should not print logs during replaying", async () => {
-            const log = spy(console, "log");
-            const error = spy(console, "error");
+            const log = stub(console, "log");
+            const error = stub(console, "error");
             await testConversation(async (conversation) => {
                 conversation.log("debug");
                 conversation.error("err");
