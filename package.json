@@ -18,7 +18,8 @@
     },
     "dependencies": {
         "@grammyjs/types": "^2.8.2",
-        "debug": "^4.3.4"
+        "debug": "^4.3.4",
+        "o-son": "^1.0.0"
     },
     "peerDependencies": {
         "grammy": "^1.10.0"

@@ -3,7 +3,9 @@ import {
     assert,
     assertEquals,
     assertFalse,
+    assertInstanceOf,
     assertRejects,
+    assertStringIncludes,
     assertThrows,
 } from "https://deno.land/std@0.166.0/testing/asserts.ts";
 import { describe, it } from "https://deno.land/std@0.166.0/testing/bdd.ts";
@@ -17,9 +19,12 @@ import {
 } from "../src/conversation.ts";
 import {
     Api,
+    ApiError,
     Bot,
     BotError,
     Context,
+    GrammyError,
+    HttpError,
     lazySession,
     type NextFunction,
     session,
@@ -290,6 +295,36 @@ describe("The conversation engine", () => {
                 { method: "sendMessage", result: msg },
                 { method: "sendMessage", result: msg },
                 { method: "sendMessage", result: msg },
+            ],
+        );
+    });
+    it("should replay errors in API calls", async () => {
+        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const err: ApiError = {
+            ok: false,
+            description: "nope",
+            error_code: 42,
+        };
+        await testConversation(
+            async (conversation, ctx) => {
+                ctx = await conversation.wait();
+                assertEquals(ctx.update, slashStart);
+                try {
+                    await ctx.reply(msg.text);
+                    throw "never";
+                } catch (err) {
+                    assertInstanceOf(err, GrammyError);
+                    assertStringIncludes(err.message, "42: nope");
+                }
+                ctx = await conversation.wait();
+                assertEquals(ctx.update, slashStart);
+                const message = await ctx.reply(msg.text);
+                assertEquals(message, msg);
+            },
+            [slashStart, slashStart, slashStart],
+            [
+                { method: "sendMessage", result: msg },
+                { method: "sendMessage", result: err },
             ],
         );
     });
@@ -1023,6 +1058,44 @@ describe("The conversation engine", () => {
                     });
                     if (random === -1) random = rnd;
                     assertEquals(random, rnd);
+                    while (true) await conversation.wait();
+                },
+                [slashStart, slashStart, slashStart, slashStart],
+            );
+        });
+        it("which should store grammY errors", async () => {
+            await testConversation(
+                async (conversation) => {
+                    try {
+                        await conversation.external(() =>
+                            Promise.reject(
+                                new GrammyError(
+                                    "msg",
+                                    {
+                                        ok: false,
+                                        error_code: 42,
+                                        description: "nope",
+                                    },
+                                    "sendMessage",
+                                    {},
+                                ),
+                            )
+                        );
+                    } catch (e) {
+                        assertInstanceOf(e, GrammyError);
+                        assertStringIncludes(e.message, "nope");
+                    }
+                    const err = await conversation.external(() =>
+                        new Error("hmpf")
+                    );
+                    try {
+                        await conversation.external(() =>
+                            Promise.reject(new HttpError("msg", err))
+                        );
+                    } catch (e) {
+                        assertInstanceOf(e, HttpError);
+                        assertEquals(e.error, err);
+                    }
                     while (true) await conversation.wait();
                 },
                 [slashStart, slashStart, slashStart, slashStart],

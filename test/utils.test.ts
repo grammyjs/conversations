@@ -10,6 +10,7 @@ import {
     createConversation,
 } from "../src/conversation.ts";
 import {
+    ApiResponse,
     Bot,
     type Chat,
     Composer,
@@ -43,7 +44,7 @@ export const slashStart: Update = {
 
 interface ApiCall<M extends keyof RawApi = keyof RawApi> {
     method: M;
-    result: Awaited<ReturnType<RawApi[M]>>;
+    result: Awaited<ReturnType<RawApi[M]>> | ApiResponse<ApiCall>;
 }
 
 export async function testConversation<T>(
@@ -65,15 +66,17 @@ export async function testConversation<T>(
             supports_inline_queries: true,
         },
     });
-    bot.api.config.use((_prev, method) =>
-        ({
-            ok: true,
-            result: results.splice(
-                results.findIndex((res) => res.method === method),
-                1,
-            )[0].result,
-        }) as any
-    );
+    bot.api.config.use((_prev, method) => {
+        const { result } = results.splice(
+            results.findIndex((res) => res.method === method),
+            1,
+        )[0];
+        return Promise.resolve(
+            typeof result === "object" && result !== null && "ok" in result
+                ? result
+                : { ok: true, result: result as any },
+        );
+    });
     bot.use(mw);
 
     let t: T | undefined = undefined;
