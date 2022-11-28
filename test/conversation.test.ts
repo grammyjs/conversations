@@ -92,6 +92,40 @@ describe("createConversation", () => {
             "Duplicate conversation identifier 'one'",
         );
     });
+    it("should take and respect timeouts", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        bot.use(
+            session({ initial: () => ({}) }),
+            conversations(),
+            createConversation(async (c) => {
+                await c.wait();
+                throw "never";
+            }, { id: "foo", maxMillisecondsToWait: -1 }),
+            createConversation(async (c) => {
+                await c.wait();
+                throw "always";
+            }, { id: "bar", maxMillisecondsToWait: 100 }),
+        );
+        bot.hears("foo", (ctx) => ctx.conversation.enter("foo"));
+        bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
+        await bot.handleUpdate({
+            update_id: 0,
+            message: { message_id, chat, date, text: "foo" },
+        });
+        await bot.handleUpdate({
+            update_id: 0,
+            message: { message_id, chat, date, text: "bar" },
+        });
+        await assertRejects(
+            () =>
+                bot.handleUpdate({
+                    update_id: 0,
+                    message: { message_id, chat, date, text: "update" },
+                }),
+            BotError,
+            "always",
+        );
+    });
     it("should work with multi sessions", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
         let works = false;
@@ -152,6 +186,32 @@ describe("ctx.conversation", () => {
             await bot.handleUpdate(slashStart);
 
             assertEquals(1, func.calls.length);
+        });
+        it("can enter a function with timeout", async () => {
+            const bot = new Bot<MyContext>("dummy", { botInfo });
+
+            function foo(conversation: MyConversation) {
+                assertEquals((conversation as any).timeout, 100);
+            }
+            function bar(conversation: MyConversation) {
+                assertEquals((conversation as any).timeout, 500);
+            }
+            bot.use(
+                session({ initial: () => ({}) }),
+                conversations(),
+                createConversation(foo, { maxMillisecondsToWait: 500 }),
+                createConversation(bar, { maxMillisecondsToWait: 500 }),
+            );
+
+            bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
+            await bot.handleUpdate({
+                update_id: 0,
+                message: { message_id, chat, date, text: "foo" },
+            });
+            await bot.handleUpdate({
+                update_id: 0,
+                message: { message_id, chat, date, text: "bar" },
+            });
         });
         it("can can overwrite the entered conversations", async () => {
             const bot = new Bot<MyContext>("dummy", { botInfo });
@@ -345,11 +405,52 @@ describe("The conversation engine", () => {
             ],
         );
     });
+    it("should be able to wait with timeouts", async () => {
+        const bot = new Bot<MyContext>("dummy", { botInfo });
+        const api = spy((
+            _prev,
+            _method: string,
+            _payload: Record<string, unknown>,
+        ) => Promise.resolve({ ok: true as const, result: true as any }));
+        bot.api.config.use(api);
+        async function conv(conversation: MyConversation, ctx: MyContext) {
+            await ctx.reply("inside");
+            await conversation.wait({ maxMilliseconds: 100 });
+            await ctx.reply("between");
+            await conversation.wait({ maxMilliseconds: -1 });
+            throw "never";
+        }
+        bot.use(
+            session({ initial: () => ({}) }),
+            conversations(),
+            createConversation(conv),
+        );
+        bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+        bot.use((ctx) => ctx.reply("outside"));
+        await bot.handleUpdate(slashStart);
+        assertEquals(api.calls.length, 1);
+        assertEquals(api.calls[0].args[1], "sendMessage");
+        assertEquals(api.calls[0].args[2].text, "inside");
+        const up = {
+            update_id: 42,
+            message: { message_id, chat, date, text: "msg" },
+        };
+        await bot.handleUpdate(up);
+        assertEquals(api.calls.length, 2);
+        assertEquals(api.calls[1].args[1], "sendMessage");
+        assertEquals(api.calls[1].args[2].text, "between");
+        await bot.handleUpdate(up);
+        assertEquals(api.calls.length, 3);
+        assertEquals(api.calls[2].args[1], "sendMessage");
+        assertEquals(api.calls[2].args[2].text, "outside");
+    });
     it("should be able to skip updates", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
-        const api = spy((_prev, _method: string) =>
-            Promise.resolve({ ok: true as const, result: true as any })
-        );
+        const api = spy((
+            _prev,
+            _method: string,
+            _payload: Record<string, unknown>,
+        ) => Promise.resolve({ ok: true as const, result: true as any }));
         bot.api.config.use(api);
         async function conv(conversation: MyConversation, ctx: MyContext) {
             await ctx.reply("inside");
@@ -366,13 +467,16 @@ describe("The conversation engine", () => {
         await bot.handleUpdate(slashStart);
         assertEquals(api.calls.length, 1);
         assertEquals(api.calls[0].args[1], "sendMessage");
+        assertEquals(api.calls[0].args[2].text, "inside");
         await bot.handleUpdate({
             update_id: 42,
             message: { message_id, chat, date, text: "msg" },
         });
         assertEquals(api.calls.length, 3);
         assertEquals(api.calls[1].args[1], "sendMessage");
+        assertEquals(api.calls[1].args[2].text, "inside");
         assertEquals(api.calls[2].args[1], "sendMessage");
+        assertEquals(api.calls[2].args[2].text, "outside");
     });
     it("should be able to drop skipped updates", async () => {
         const bot = new Bot<MyContext>("dummy", { botInfo });
@@ -1164,8 +1268,9 @@ describe("The conversation engine", () => {
                     new Api(""),
                     botInfo,
                 ) as MyContext,
-                { u: [] },
+                { log: { u: [] }, last: 0 },
                 resolver(),
+                undefined,
             );
             assertThrows(() => handle.session, "No context");
             assertThrows(() => (handle.session = undefined), "No context");

@@ -216,6 +216,11 @@ class ConversationControls {
      * true` to `enter`.
      *
      * Note that this method is async. You must `await` this method.
+     *
+     * While it is possible to reenter a conversation from within another
+     * conversation in order to start a parallel conversation, it is usually
+     * preferable to simply call the other conversation function directly:
+     * https://grammy.dev/plugins/conversations.html#functions-and-recursion
      */
     public async reenter(id: string) {
         await this.enter(id, { overwrite: true });
@@ -263,6 +268,11 @@ interface ActiveConversation {
      * replay past operations when resuming.
      */
     log: OpLog;
+    /**
+     * Time in milliseconds since The Epoch which describes that last time the
+     * conversation builder function was advanced. Used to implement timeouts.
+     */
+    last?: number;
 }
 /**
  * Describes a log entry that does not only know its chronological position in
@@ -318,8 +328,20 @@ interface ExtOp extends AsyncOrder {
     };
 }
 
-/** Ops that can lead to intertuption of function execution */
-type ResolveOps = "wait" | "skip" | "drop" | "done";
+/**
+ * Ops that can lead to interruption of function execution.
+ *
+ * - wait: conversation advanced, rerun it with next update (consumed: true, exit: false)
+ * - skip: skip this conversation, run next one (consumed: false, exit: false)
+ * - timeout: conversation timed out, exit it and then `skip` (consumed: false, exit: true)
+ * - done: conversation finished normally, exit it (consumed: true, exit: true)
+ */
+interface ResolveOps {
+    /** Has the conversation consumed the update? */
+    consumed: boolean;
+    /** Should this conversation be exited? */
+    exit: boolean;
+}
 
 /**
  * Creates a runner function which is in turn able to execute conversation
@@ -328,6 +350,7 @@ type ResolveOps = "wait" | "skip" | "drop" | "done";
 function conversationRunner<C extends Context>(
     ctx: C & ConversationFlavor,
     builder: ConversationFn<C>,
+    timeout: number | undefined,
 ) {
     /**
      * Adds an entry for the current context object to the given log,
@@ -364,10 +387,10 @@ function conversationRunner<C extends Context>(
      * handled the update, i.e. completed normally or via a wait call. Note that
      * this function re-throws errors thrown by the conversation.
      */
-    async function run(log: OpLog) {
+    async function run(data: ActiveConversation): Promise<ResolveOps> {
         // Create the conversation handle
         const rsr = resolver<ResolveOps>(); // used to catch `wait` calls
-        const handle = new ConversationHandle<C>(ctx, log, rsr);
+        const handle = new ConversationHandle<C>(ctx, data, rsr, timeout);
         // We are either starting the conversation builder function from
         // scratch, or we are beginning a replay operation. In both cases, the
         // current context object is new to the conversation builder function,
@@ -386,7 +409,7 @@ function conversationRunner<C extends Context>(
         } finally {
             handle._deactivate();
         }
-        return rsr.value ?? "done";
+        return rsr.value ?? { consumed: true, exit: true };
     }
 
     return run;
@@ -461,19 +484,46 @@ export function conversations<C extends Context>(): MiddlewareFn<
 }
 
 /**
+ * Configuration options that can be passed when using `createConversation` to
+ * turn a conversation builder function into middleware.
+ */
+export interface ConversationConfig {
+    /**
+     * Identifier of the conversation which can be used to enter it. Defaults to
+     * the name of the function.
+     */
+    id?: string;
+    /**
+     * Maximum number of milliseconds to wait. If an update is received after
+     * this time has elapsed, the conversation will be left automatically
+     * instead of resuming, and the update will be handled as if the
+     * conversation had not been active.
+     *
+     * This is the default value that each conversation with this identifier
+     * starts with. Note that you can override this value for a specific run of
+     * the conversation when calling `ctx.conversation.enter`. In addition, you
+     * can adjust this value from within a conversation between wait calls by
+     * assigning a new value to `conversation.millisecondsToWait`.
+     */
+    maxMillisecondsToWait?: number;
+}
+
+/**
  * Takes a conversation builder function, and turns it into grammY middleware
  * which can be installed on your bot. Check out the
  * [documentation](https://grammy.dev/plugins/conversations.html) to learn more
  * about how conversation builder functions can be created.
  *
  * @param builder Conversation builder function
- * @param id Identifier of the conversation, defaults to `builder.name`
+ * @param config Identifier of the conversation or configuration object
  * @returns Middleware to be installed on the bot
  */
 export function createConversation<C extends Context>(
     builder: ConversationFn<C>,
-    id = builder.name,
+    config: string | ConversationConfig = {},
 ): MiddlewareFn<C & ConversationFlavor> {
+    const { id = builder.name, maxMillisecondsToWait }: ConversationConfig =
+        typeof config === "string" ? { id: config } : config;
     if (!id) throw new Error("Cannot register a function without name!");
     return async (ctx, next) => {
         if (ctx.conversation === undefined) {
@@ -490,27 +540,27 @@ export function createConversation<C extends Context>(
         index.add(id);
 
         // Define how to run a conversation builder function
-        const runOnLog = conversationRunner(ctx, builder);
+        const runOnData = conversationRunner(
+            ctx,
+            builder,
+            maxMillisecondsToWait,
+        );
 
         /**
          * Runs our conversation builder function for all given logs in
          * ascending order until the first decides to handle the update.
          */
         async function runUntilComplete(conversations: ActiveConversation[]) {
-            let op: ResolveOps = "skip";
-            for (
-                let i = 0;
-                (op === "skip" || op === "drop") && i < conversations.length;
-                i++
-            ) {
+            let op: ResolveOps = { consumed: false, exit: false };
+            for (let i = 0; !op.consumed && i < conversations.length; i++) {
                 const current = conversations[i];
                 try {
-                    op = await runOnLog(current.log);
+                    op = await runOnData(current);
                 } catch (e) {
                     conversations.splice(i, 1);
                     throw e;
                 }
-                if (op === "done") conversations.splice(i, 1);
+                if (op.exit) conversations.splice(i--, 1);
             }
             return op;
         }
@@ -524,7 +574,10 @@ export function createConversation<C extends Context>(
             }
             const session = await ctx.conversation[internal].session();
             session.conversation ??= {};
-            const entry: ActiveConversation = { log: { u: [] } };
+            const entry: ActiveConversation = {
+                log: { u: [] },
+                last: Date.now(),
+            };
             const append = [entry];
             if (opts?.overwrite) session.conversation[id] = append;
             else (session.conversation[id] ??= []).push(...append);
@@ -544,7 +597,7 @@ export function createConversation<C extends Context>(
         const session = await ctx.conversation[internal].session();
         try {
             // Run all existing conversations with our identifier
-            let op: ResolveOps = "skip";
+            let op: ResolveOps = { consumed: false, exit: false };
             if (session.conversation?.[id] !== undefined) {
                 try {
                     op = await runUntilComplete(session.conversation[id]);
@@ -558,7 +611,7 @@ export function createConversation<C extends Context>(
 
             // If all ran conversations (if any) called skip as their last op,
             // we run the downstream middleware
-            if (op === "skip") await next();
+            if (!op.consumed) await next();
         } finally {
             // Clean up if no conversations remain
             if (
@@ -583,6 +636,7 @@ export type OtherwiseHandler<C extends Context> = (
  */
 export interface OtherwiseOptions<C extends Context> {
     drop?: boolean;
+    maxMilliseconds?: number;
     otherwise?: OtherwiseHandler<C>;
 }
 /**
@@ -675,8 +729,9 @@ export class ConversationHandle<C extends Context> {
 
     constructor(
         private readonly ctx: C,
-        private readonly opLog: OpLog,
+        private readonly data: ActiveConversation,
         private readonly rsr: Resolver<ResolveOps>,
+        private readonly timeout: number | undefined,
     ) {
         // We intercept Bot API calls, returning logged responses while
         // replaying, and logging the responses of performed calls otherwise.
@@ -706,7 +761,7 @@ export class ConversationHandle<C extends Context> {
      * you know exactly what you are doing.
      */
     get _isReplaying() {
-        return this.replayIndex.wait < this.opLog.u.length;
+        return this.replayIndex.wait < this.data.log.u.length;
     }
     /**
      * Internal method, replays a wait operation and advances the replay cursor.
@@ -718,7 +773,7 @@ export class ConversationHandle<C extends Context> {
                 "Replay stack exhausted, you may not call this method!",
             );
         }
-        const { u, x, f = [] } = this.opLog.u[this.replayIndex.wait];
+        const { u, x, f = [] } = this.data.log.u[this.replayIndex.wait];
         this.replayIndex = { wait: 1 + this.replayIndex.wait };
         let ctx: C;
         if (!this._isReplaying) {
@@ -757,7 +812,7 @@ export class ConversationHandle<C extends Context> {
             this.replayIndex.api.set(method, index);
         }
         const result =
-            this.opLog.u[this.replayIndex.wait - 1].a?.[method][index];
+            this.data.log.u[this.replayIndex.wait - 1].a?.[method][index];
         this.replayIndex.api?.set(method, 1 + index);
         if (result === undefined) {
             return new Promise<never>(() => {});
@@ -772,7 +827,7 @@ export class ConversationHandle<C extends Context> {
     _replayExt(): Promise<NonNullable<ExtOp["r"]>> {
         let index = this.replayIndex.ext;
         if (index === undefined) this.replayIndex.ext = index = 0;
-        const result = this.opLog.u[this.replayIndex.wait - 1].e?.[index];
+        const result = this.data.log.u[this.replayIndex.wait - 1].e?.[index];
         this.replayIndex.ext = 1 + index;
         if (result === undefined) return new Promise<never>(() => {});
         return this._resolveAt(result.i, result.r);
@@ -782,14 +837,14 @@ export class ConversationHandle<C extends Context> {
      * what you are doing.
      */
     _logWait(op: WaitOp) {
-        this.opLog.u.push(op);
+        this.data.log.u.push(op);
     }
     /**
      * Internal method, unlogs the most recent call. Do not use unless you know
      * exactly what you are doing.
      */
     _unlogWait() {
-        const op = this.opLog.u.pop();
+        const op = this.data.log.u.pop();
         if (op === undefined) throw new Error("Empty log, cannot unlog!");
         return op;
     }
@@ -800,7 +855,7 @@ export class ConversationHandle<C extends Context> {
     _logApi(method: string): ApiOp {
         const index = this.replayIndex.wait;
         const slot = { i: -1 };
-        ((this.opLog.u[index - 1].a ??= {})[method] ??= []).push(slot);
+        ((this.data.log.u[index - 1].a ??= {})[method] ??= []).push(slot);
         return slot;
     }
     /**
@@ -810,7 +865,7 @@ export class ConversationHandle<C extends Context> {
     _logExt(): ExtOp {
         const index = this.replayIndex.wait;
         const slot = { i: -1 };
-        (this.opLog.u[index - 1].e ??= []).push(slot);
+        (this.data.log.u[index - 1].e ??= []).push(slot);
         return slot;
     }
     /**
@@ -850,12 +905,29 @@ export class ConversationHandle<C extends Context> {
      * user. Once received, this method returns the new context object for the
      * incoming update.
      */
-    async wait(): Promise<C> {
+    async wait(
+        opts: { maxMilliseconds?: number } = { maxMilliseconds: this.timeout },
+    ): Promise<C> {
         // If this is an old wait, simply return the old context object
-        if (this._isReplaying) return await this._replayWait();
+        if (this._isReplaying) {
+            const ctx = await this._replayWait();
+            // Exit the conversation if the wait expired
+            const timeout = opts.maxMilliseconds;
+            if (
+                !this._isReplaying && // limit to the current wait
+                this.data.last !== undefined &&
+                timeout !== undefined &&
+                this.data.last + timeout < Date.now()
+            ) {
+                // conversation expired, leave it
+                this.rsr.resolve({ consumed: false, exit: true });
+                await new Promise<never>(() => {});
+            }
+            return ctx;
+        }
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
-        this.rsr.resolve("wait");
+        this.rsr.resolve({ consumed: true, exit: false });
         // Intercept function execution
         await new Promise<never>(() => {}); // BOOM
         // deno-lint-ignore no-explicit-any
@@ -883,8 +955,8 @@ export class ConversationHandle<C extends Context> {
         predicate: (ctx: C) => boolean | Promise<boolean>,
         opts?: OtherwiseConfig<C>,
     ): Promise<C> {
-        const { otherwise, drop } = toObj(opts);
-        const ctx = await this.wait();
+        const { otherwise, drop, maxMilliseconds } = toObj(opts);
+        const ctx = await this.wait({ maxMilliseconds });
         if (!await predicate(ctx)) {
             await otherwise?.(ctx);
             await this.skip({ drop });
@@ -1053,7 +1125,7 @@ export class ConversationHandle<C extends Context> {
         this._unlogWait();
         // Notify the resolver so that we can catch the function interception
         // and resume middleware execution normally outside of the conversation
-        this.rsr.resolve(drop ? "drop" : "skip");
+        this.rsr.resolve({ consumed: drop, exit: false });
         // Intercept function execution
         return await new Promise<never>(() => {}); // BOOM
     }

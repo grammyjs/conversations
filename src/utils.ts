@@ -10,7 +10,6 @@ export function ident<T>(arg: T) {
  * functions.
  */
 export function clone<T>(arg: T) {
-    // TODO: replace ugly hack with better cloning
     const list = listify(arg);
     if (Array.isArray(list) && list.length === 0) return undefined;
     return delistify(list);
