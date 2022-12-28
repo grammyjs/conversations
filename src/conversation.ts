@@ -1296,6 +1296,27 @@ export class ConversationHandle<C extends Context> {
     now() {
         return this.external({ task: () => Date.now() });
     }
+    /**
+     * Runs a piece of middleware for each already received context object every
+     * time a context object is received. This can be used to install plugins
+     * inside conversations.
+     *
+     * For instance, if three context objects arrive, this is what happens:
+     *
+     * 1. the first update is received
+     * 2. the middleware runs for the first update
+     * 3. the second update is received
+     * 4. the middleware runs for the first update
+     * 5. the middleware runs for the second update
+     * 6. the third update is received
+     * 7. the middleware runs for the first update
+     * 8. the middleware runs for the second update
+     * 9. the middleware runs for the third update
+     *
+     * Note that the middleware is run with first update thrice.
+     *
+     * @param middleware The middleware to run
+     */
     async run(...middleware: Middleware<C>[]) {
         if (this.currentCtx === undefined) throw new Error("No context!");
         await runAsLeaf(this.currentCtx, ...middleware);
