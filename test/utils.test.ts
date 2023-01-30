@@ -19,6 +19,7 @@ import {
     type RawApi,
     session,
     type Update,
+    type User,
 } from "../src/deps.deno.ts";
 
 type MyContext = Context & ConversationFlavor;
@@ -30,12 +31,18 @@ export const chat: Chat.PrivateChat = {
     last_name: "Boi",
     username: "mr_convo_boi_69",
 };
+export const from: User = {
+    id: 42,
+    first_name: "Bob",
+    is_bot: false,
+};
 export const date = Math.trunc(Date.now() / 1000);
 export const slashStart: Update = {
     update_id: 14,
     message: {
         message_id: message_id - 1,
         chat,
+        from,
         date,
         text: "/start",
         entities: [{ type: "bot_command", offset: 0, length: "/start".length }],

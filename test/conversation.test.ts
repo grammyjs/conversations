@@ -35,6 +35,7 @@ import { resolver } from "../src/utils.ts";
 import {
     chat,
     date,
+    from,
     message_id,
     slashStart,
     testConversation,
@@ -110,17 +111,17 @@ describe("createConversation", () => {
         bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
         await bot.handleUpdate({
             update_id: 0,
-            message: { message_id, chat, date, text: "foo" },
+            message: { message_id, chat, from, date, text: "foo" },
         });
         await bot.handleUpdate({
             update_id: 0,
-            message: { message_id, chat, date, text: "bar" },
+            message: { message_id, chat, from, date, text: "bar" },
         });
         await assertRejects(
             () =>
                 bot.handleUpdate({
                     update_id: 0,
-                    message: { message_id, chat, date, text: "update" },
+                    message: { message_id, chat, from, date, text: "update" },
                 }),
             BotError,
             "always",
@@ -206,11 +207,11 @@ describe("ctx.conversation", () => {
             bot.hears("bar", (ctx) => ctx.conversation.enter("bar"));
             await bot.handleUpdate({
                 update_id: 0,
-                message: { message_id, chat, date, text: "foo" },
+                message: { message_id, chat, from, date, text: "foo" },
             });
             await bot.handleUpdate({
                 update_id: 0,
-                message: { message_id, chat, date, text: "bar" },
+                message: { message_id, chat, from, date, text: "bar" },
             });
         });
         it("can can overwrite the entered conversations", async () => {
@@ -284,23 +285,24 @@ describe("ctx.conversation", () => {
             await bot.handleUpdate(slashStart);
             await bot.handleUpdate({
                 update_id: 20,
-                message: { message_id, chat, date, text: "leave" },
+                message: { message_id, chat, from, date, text: "leave" },
             });
             await bot.handleUpdate(slashStart);
             await bot.handleUpdate({
                 update_id: 21,
-                message: { message_id, chat, date, text: "leave all" },
+                message: { message_id, chat, from, date, text: "leave all" },
             });
             await bot.handleUpdate(slashStart);
             await bot.handleUpdate({
                 update_id: 22,
-                message: { message_id, chat, date, text: "reenter" },
+                message: { message_id, chat, from, date, text: "reenter" },
             });
             await bot.handleUpdate({
                 update_id: 23,
                 message: {
                     message_id,
                     chat,
+                    from,
                     date,
                     text: "/check",
                     entities: [{
@@ -348,7 +350,7 @@ describe("The conversation engine", () => {
         );
     });
     it("should replay API calls", async () => {
-        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const msg = { message_id: 0, chat, from, date, text: "Hi there!" };
         await testConversation(
             async (conversation, ctx) => {
                 ctx = await conversation.wait();
@@ -376,7 +378,7 @@ describe("The conversation engine", () => {
         );
     });
     it("should replay errors in API calls", async () => {
-        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const msg = { message_id: 0, chat, from, date, text: "Hi there!" };
         const err: ApiError = {
             ok: false,
             description: "nope",
@@ -433,7 +435,7 @@ describe("The conversation engine", () => {
         assertEquals(api.calls[0].args[2].text, "inside");
         const up = {
             update_id: 42,
-            message: { message_id, chat, date, text: "msg" },
+            message: { message_id, chat, from, date, text: "msg" },
         };
         await bot.handleUpdate(up);
         assertEquals(api.calls.length, 2);
@@ -470,7 +472,7 @@ describe("The conversation engine", () => {
         assertEquals(api.calls[0].args[2].text, "inside");
         await bot.handleUpdate({
             update_id: 42,
-            message: { message_id, chat, date, text: "msg" },
+            message: { message_id, chat, from, date, text: "msg" },
         });
         assertEquals(api.calls.length, 3);
         assertEquals(api.calls[1].args[1], "sendMessage");
@@ -509,7 +511,7 @@ describe("The conversation engine", () => {
         assertEquals(api.calls[0].args[1], "sendMessage");
         await bot.handleUpdate({
             update_id: 42,
-            message: { message_id, chat, date, text: "msg" },
+            message: { message_id, chat, from, date, text: "msg" },
         });
         assertEquals(api.calls.length, 3);
         assertEquals(api.calls[1].args[1], "sendMessage");
@@ -578,7 +580,7 @@ describe("The conversation engine", () => {
         );
     });
     it("should permit floating promises in API calls", async () => {
-        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const msg = { message_id: 0, chat, from, date, text: "Hi there!" };
         await testConversation(
             async (conversation, ctx) => {
                 ctx = await conversation.wait();
@@ -592,7 +594,7 @@ describe("The conversation engine", () => {
         );
     });
     it("should be able to handle missing API call results", async () => {
-        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const msg = { message_id: 0, chat, from, date, text: "Hi there!" };
         await testConversation(
             async (conversation, ctx) => {
                 ctx.reply(msg.text);
@@ -608,7 +610,7 @@ describe("The conversation engine", () => {
         );
     });
     it("should proxy functions installed on the context object", async () => {
-        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const msg = { message_id: 0, chat, from, date, text: "Hi there!" };
         const func = spy((val: number) => val + 1);
         const answer = await testConversation(
             async (conversation, ctx) => {
@@ -640,7 +642,7 @@ describe("The conversation engine", () => {
         assertEquals(func.calls[1].returned, 42);
     });
     it("should allow previously proxied functions to be missing on the context object", async () => {
-        const msg = { message_id: 0, chat, date, text: "Hi there!" };
+        const msg = { message_id: 0, chat, from, date, text: "Hi there!" };
         let call = 0;
         const func = spy((val: number) => val + 1);
         const answer = await testConversation(
@@ -726,6 +728,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "xyz" },
                         },
@@ -734,6 +737,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             text: "yay!",
                         },
@@ -759,6 +763,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "xyz" },
                         },
@@ -767,6 +772,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             text: "yay!",
                         },
@@ -775,6 +781,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             text: "oh yay!",
                         },
@@ -783,6 +790,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "xyz" },
                             caption: "yay!",
@@ -807,6 +815,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "xyz" },
                         },
@@ -834,6 +843,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "xyz" },
                         },
@@ -900,6 +910,7 @@ describe("The conversation engine", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "xyz" },
                         },
@@ -962,8 +973,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: botInfo,
                         chat,
+                        from: botInfo,
                         date,
                         text: "nope",
                     },
@@ -971,12 +982,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: {
-                            id: 42,
-                            first_name: "Mr. Magic Man",
-                            is_bot: false,
-                        },
                         chat,
+                        from,
                         date,
                         text: "yay!",
                     },
@@ -984,12 +991,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: {
-                            id: 42,
-                            first_name: "Mr. Magic Man",
-                            is_bot: false,
-                        },
                         chat,
+                        from,
                         date,
                         text: "nope",
                     },
@@ -997,8 +1000,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: botInfo,
                         chat,
+                        from: botInfo,
                         date,
                         text: "yay!",
                     },
@@ -1019,8 +1022,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: botInfo,
                         chat,
+                        from: botInfo,
                         date,
                         text: "nope",
                     },
@@ -1028,12 +1031,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: {
-                            id: 42,
-                            first_name: "Mr. Magic Man",
-                            is_bot: false,
-                        },
                         chat,
+                        from,
                         date,
                         text: "yay!",
                     },
@@ -1041,12 +1040,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: {
-                            id: 42,
-                            first_name: "Mr. Magic Man",
-                            is_bot: false,
-                        },
                         chat,
+                        from,
                         date,
                         text: "nope",
                     },
@@ -1054,8 +1049,8 @@ describe("The conversation engine", () => {
                     update_id: 0,
                     message: {
                         message_id,
-                        from: botInfo,
                         chat,
+                        from: botInfo,
                         date,
                         text: "yay!",
                     },
@@ -1069,13 +1064,9 @@ describe("The conversation engine", () => {
                 42,
                 await testConversation(
                     async (conversation) => {
-                        let ctx = await conversation.waitForReplyTo(
-                            message_id,
-                        );
+                        let ctx = await conversation.waitForReplyTo(message_id);
                         assertEquals(ctx.msg?.text, "yay!");
-                        ctx = await conversation.waitForReplyTo(
-                            ctx.msg,
-                        );
+                        ctx = await conversation.waitForReplyTo(ctx.msg);
                         assertEquals(ctx.msg?.text, "yay!");
                         return 42;
                     },
@@ -1084,11 +1075,12 @@ describe("The conversation engine", () => {
                         message: {
                             message_id: 2,
                             chat,
+                            from,
                             date,
                             text: "nope",
                         },
                     }, {
-                        update_id: 0,
+                        update_id: 1,
                         message: {
                             message_id: 3,
                             reply_to_message: {
@@ -1099,11 +1091,12 @@ describe("The conversation engine", () => {
                                 reply_to_message: undefined,
                             },
                             chat,
+                            from,
                             date,
                             text: "nope",
                         },
                     }, {
-                        update_id: 0,
+                        update_id: 2,
                         message: {
                             message_id: 2444,
                             reply_to_message: {
@@ -1114,12 +1107,13 @@ describe("The conversation engine", () => {
                                 reply_to_message: undefined,
                             },
                             chat,
+                            from,
                             date,
                             text: "yay!",
                         },
                     }, {
-                        update_id: 0,
-                        channel_post: {
+                        update_id: 3,
+                        message: {
                             message_id: 27,
                             reply_to_message: {
                                 message_id,
@@ -1129,12 +1123,13 @@ describe("The conversation engine", () => {
                                 reply_to_message: undefined,
                             },
                             chat,
+                            from,
                             date,
                             text: "nah",
                         },
                     }, {
-                        update_id: 0,
-                        channel_post: {
+                        update_id: 4,
+                        message: {
                             message_id: 2,
                             reply_to_message: {
                                 message_id: 2444,
@@ -1144,6 +1139,7 @@ describe("The conversation engine", () => {
                                 reply_to_message: undefined,
                             },
                             chat,
+                            from,
                             date,
                             text: "yay!",
                         },
@@ -1416,7 +1412,7 @@ describe("The conversation engine", () => {
             ) => (seq += ctx.msg?.text ?? "m", next()));
             const msg: Update = {
                 update_id: 10,
-                message: { message_id, chat, date, text: "t" },
+                message: { message_id, chat, from, date, text: "t" },
             };
             assertEquals(
                 42,
@@ -1441,15 +1437,15 @@ describe("The conversation engine", () => {
         it("which should pass all future context objects through the already installed middleware", async () => {
             const p: Update = {
                 update_id: 43,
-                message: { message_id, chat, date, text: "p" },
+                message: { message_id, chat, from, date, text: "p" },
             };
             const q: Update = {
                 update_id: 43,
-                message: { message_id, chat, date, text: "q" },
+                message: { message_id, chat, from, date, text: "q" },
             };
             const r: Update = {
                 update_id: 43,
-                message: { message_id, chat, date, text: "r" },
+                message: { message_id, chat, from, date, text: "r" },
             };
             let seq = "";
             assertEquals(
@@ -1502,15 +1498,15 @@ describe("The conversation engine", () => {
         it("which should allow middleware to consume updates", async () => {
             const p: Update = {
                 update_id: 43,
-                message: { message_id, chat, date, text: "p" },
+                message: { message_id, chat, from, date, text: "p" },
             };
             const q: Update = {
                 update_id: 43,
-                message: { message_id, chat, date, text: "q" },
+                message: { message_id, chat, from, date, text: "q" },
             };
             const r: Update = {
                 update_id: 43,
-                message: { message_id, chat, date, text: "r" },
+                message: { message_id, chat, from, date, text: "r" },
             };
             async function conv(conversation: MyConversation, ctx: MyContext) {
                 await conversation.run(async (ctx, next) => {

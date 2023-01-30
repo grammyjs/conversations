@@ -4,7 +4,13 @@ import {
     assertSpyCall,
     spy,
 } from "https://deno.land/std@0.156.0/testing/mock.ts";
-import { chat, date, message_id, testConversation } from "./utils.test.ts";
+import {
+    chat,
+    date,
+    from,
+    message_id,
+    testConversation,
+} from "./utils.test.ts";
 
 describe("forms", () => {
     describe("text", () => {
@@ -17,7 +23,7 @@ describe("forms", () => {
                         throw "never";
                     }), {
                     update_id: 20,
-                    message: { message_id, chat, date, text },
+                    message: { message_id, chat, from, date, text },
                 }),
             );
             assertEquals(
@@ -27,6 +33,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                         caption: text,
@@ -43,6 +50,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -60,6 +68,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -78,7 +87,7 @@ describe("forms", () => {
                         throw "never";
                     }), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "42.2" },
+                    message: { message_id, chat, from, date, text: "42.2" },
                 }),
             );
             assertEquals(
@@ -88,7 +97,7 @@ describe("forms", () => {
                         throw "never";
                     }), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "42.2xyz" },
+                    message: { message_id, chat, from, date, text: "42.2xyz" },
                 }),
             );
             assertEquals(
@@ -100,6 +109,7 @@ describe("forms", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "def" },
                             caption: "42",
@@ -114,7 +124,13 @@ describe("forms", () => {
                 undefined,
                 await testConversation((c) => c.form.number(), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "not a number" },
+                    message: {
+                        message_id,
+                        chat,
+                        from,
+                        date,
+                        text: "not a number",
+                    },
                 }),
             );
             assertEquals(
@@ -124,6 +140,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -141,6 +158,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -159,28 +177,28 @@ describe("forms", () => {
                         throw "never";
                     }), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "42" },
+                    message: { message_id, chat, from, date, text: "42" },
                 }),
             );
             assertEquals(
                 2,
                 await testConversation((c) => c.form.int(), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "2a" },
+                    message: { message_id, chat, from, date, text: "2a" },
                 }),
             );
             assertEquals(
                 42,
                 await testConversation((c) => c.form.int(16), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "2a" },
+                    message: { message_id, chat, from, date, text: "2a" },
                 }),
             );
             assertEquals(
                 42,
                 await testConversation((c) => c.form.int(), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "42.2" },
+                    message: { message_id, chat, from, date, text: "42.2" },
                 }),
             );
             assertEquals(
@@ -192,6 +210,7 @@ describe("forms", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "def" },
                             caption: "42",
@@ -206,7 +225,13 @@ describe("forms", () => {
                 undefined,
                 await testConversation((c) => c.form.int(), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "not an int" },
+                    message: {
+                        message_id,
+                        chat,
+                        from,
+                        date,
+                        text: "not an int",
+                    },
                 }),
             );
             assertEquals(
@@ -216,6 +241,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -233,6 +259,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -250,7 +277,7 @@ describe("forms", () => {
                     (c) => c.form.select(["A", "a", "B", "b", "C", "c"]),
                     {
                         update_id: 20,
-                        message: { message_id, chat, date, text: "B" },
+                        message: { message_id, chat, from, date, text: "B" },
                     },
                 ),
             );
@@ -263,6 +290,7 @@ describe("forms", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "def" },
                             caption: "c",
@@ -282,6 +310,7 @@ describe("forms", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             text: "d",
                         },
@@ -297,6 +326,7 @@ describe("forms", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "def" },
                         },
@@ -321,6 +351,7 @@ describe("forms", () => {
                         message: {
                             message_id,
                             chat,
+                            from,
                             date,
                             document: { file_id: "abc", file_unique_id: "def" },
                         },
@@ -338,7 +369,7 @@ describe("forms", () => {
                 new URL(url),
                 await testConversation((c) => c.form.url(), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: url },
+                    message: { message_id, chat, from, date, text: url },
                 }),
             );
         });
@@ -348,7 +379,7 @@ describe("forms", () => {
                 undefined,
                 await testConversation((c) => c.form.url(), {
                     update_id: 20,
-                    message: { message_id, chat, date, text: "asdf" },
+                    message: { message_id, chat, from, date, text: "asdf" },
                 }),
             );
             assertEquals(
@@ -358,6 +389,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
@@ -374,6 +406,7 @@ describe("forms", () => {
                     message: {
                         message_id,
                         chat,
+                        from,
                         date,
                         document: { file_id: "abc", file_unique_id: "def" },
                     },
