@@ -242,7 +242,7 @@ class ConversationControls {
      */
     public async exit(id?: string) {
         const session = await this[internal].session();
-        if (session.conversation === undefined) return;
+        if (session.conversation == undefined) return;
         if (id === undefined) {
             // Simply clear all conversation data
             session.conversation = undefined;
@@ -472,7 +472,7 @@ export function conversations<C extends Context>(): MiddlewareFn<
         await next();
         if (transformed) {
             const session = await ctx.session;
-            if (session.conversation !== undefined) {
+            if (session.conversation != undefined) {
                 session.conversation = listify(
                     session.conversation,
                     KNOWN_TYPES,
@@ -615,7 +615,7 @@ export function createConversation<C extends Context>(
         } finally {
             // Clean up if no conversations remain
             if (
-                session.conversation !== undefined &&
+                session.conversation != undefined &&
                 Object.keys(session.conversation).length === 0
             ) {
                 session.conversation = undefined;
