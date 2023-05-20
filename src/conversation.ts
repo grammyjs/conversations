@@ -242,7 +242,7 @@ class ConversationControls {
      */
     public async exit(id?: string) {
         const session = await this[internal].session();
-        if (session.conversation == undefined) return;
+        if (session.conversation == null) return;
         if (id === undefined) {
             // Simply clear all conversation data
             session.conversation = undefined;
