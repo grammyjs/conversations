@@ -472,7 +472,7 @@ export function conversations<C extends Context>(): MiddlewareFn<
         await next();
         if (transformed) {
             const session = await ctx.session;
-            if (session.conversation != undefined) {
+            if (session.conversation != null) {
                 session.conversation = listify(
                     session.conversation,
                     KNOWN_TYPES,
