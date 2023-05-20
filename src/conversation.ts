@@ -615,7 +615,7 @@ export function createConversation<C extends Context>(
         } finally {
             // Clean up if no conversations remain
             if (
-                session.conversation != undefined &&
+                session.conversation != null &&
                 Object.keys(session.conversation).length === 0
             ) {
                 session.conversation = undefined;
