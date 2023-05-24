@@ -378,7 +378,7 @@ function conversationRunner<C extends Context>(
         );
         // Do not store old session data, removing a lot of unused data
         delete extra.session.conversation;
-        return { u: ctx.update, x: extra, f: functions };
+        return { u: ctx.update as Update, x: extra, f: functions };
     }
 
     /**
