@@ -10,26 +10,20 @@
         "report": "genhtml ./coverage.lcov --output-directory ./test/coverage/ && echo 'Point your browser to test/coverage/index.html to see the test coverage report.'"
     },
     "fmt": {
-        "options": {
-            "indentWidth": 4,
-            "proseWrap": "preserve"
-        },
-        "files": {
-            "exclude": [
-                "./node_modules/",
-                "./out/",
-                "./package-lock.json",
-                "./test/cov_profile"
-            ]
-        }
+        "indentWidth": 4,
+        "proseWrap": "preserve",
+        "exclude": [
+            "./node_modules/",
+            "./out/",
+            "./package-lock.json",
+            "./test/cov_profile"
+        ]
     },
     "lint": {
-        "files": {
-            "exclude": [
-                "./node_modules/",
-                "./out/",
-                "./package-lock.json"
-            ]
-        }
+        "exclude": [
+            "./node_modules/",
+            "./out/",
+            "./package-lock.json"
+        ]
     }
 }
