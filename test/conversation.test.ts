@@ -7,9 +7,9 @@ import {
     assertRejects,
     assertStringIncludes,
     assertThrows,
-} from "https://deno.land/std@0.166.0/testing/asserts.ts";
-import { describe, it } from "https://deno.land/std@0.166.0/testing/bdd.ts";
-import { spy, stub } from "https://deno.land/std@0.166.0/testing/mock.ts";
+} from "https://deno.land/std@0.177.1/testing/asserts.ts";
+import { describe, it } from "https://deno.land/std@0.177.1/testing/bdd.ts";
+import { spy, stub } from "https://deno.land/std@0.177.1/testing/mock.ts";
 import {
     type Conversation,
     type ConversationFlavor,

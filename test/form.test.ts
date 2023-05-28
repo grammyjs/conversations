@@ -1,9 +1,9 @@
-import { assertEquals } from "https://deno.land/std@0.156.0/testing/asserts.ts";
-import { describe, it } from "https://deno.land/std@0.156.0/testing/bdd.ts";
+import { assertEquals } from "https://deno.land/std@0.177.1/testing/asserts.ts";
+import { describe, it } from "https://deno.land/std@0.177.1/testing/bdd.ts";
 import {
     assertSpyCall,
     spy,
-} from "https://deno.land/std@0.156.0/testing/mock.ts";
+} from "https://deno.land/std@0.177.1/testing/mock.ts";
 import {
     chat,
     date,
