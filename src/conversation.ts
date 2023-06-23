@@ -30,8 +30,9 @@ import {
     resolver,
 } from "./utils.ts";
 type MaybeArray<T> = T | T[];
-// deno-lint-ignore ban-types
-type StringWithSuggestions<S extends string> = (string & {}) | S;
+type StringWithSuggestions<S extends string> =
+    | (string & Record<never, never>)
+    | S;
 
 /**
  * A user-defined conversation builder function that can be turned into
