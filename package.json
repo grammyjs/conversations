@@ -34,6 +34,18 @@
     ],
     "main": "./out/mod.js",
     "types": "./out/mod.d.ts",
+    "exports": {
+        ".": {
+            "types": "./out/mod.d.ts",
+            "node": "./out/mod.js",
+            "browser": "./out/web.mjs",
+            "default": "./out/web.mjs"
+        },
+        "./web": {
+            "types": "./out/web.d.ts",
+            "default": "./out/web.mjs"
+        }
+    },
     "keywords": [
         "telegram",
         "bot",

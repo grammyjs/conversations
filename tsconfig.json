@@ -14,5 +14,10 @@
         "skipLibCheck": true,
         "target": "es2019"
     },
-    "include": ["src/"]
+    "include": [
+      "src/"
+    ],
+    "exclude": [
+        "src/*.web.ts"
+    ]
 }
