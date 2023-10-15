@@ -1,44 +1,104 @@
+import { resolver } from "./resolve.ts";
+import { create, cursor, mutate, type ReplayState } from "./state.ts";
+
 export interface ReplayControls {
-    interrupt(): Promise<never>;
+    interrupt(key?: string): Promise<unknown>;
+    action(fn: () => Promise<unknown>, key?: string): Promise<unknown>;
 }
-export type Builder<A extends unknown[], R> = (
-    controls: ReplayControls,
-    ...a: A
-) => R | Promise<R>;
+export type Builder = (controls: ReplayControls) => void | Promise<void>;
 
-export interface ReplayResult<A extends unknown[], R> {
-    state: ReplayState<A>;
-    returned?: R;
+export type ReplayResult = Returned | Thrown | Interrupted;
+export interface Returned {
+    type: "returned";
+    returnValue: unknown;
 }
-export interface ReplayState<A extends unknown[]> {
-    args: A;
+export interface Thrown {
+    type: "thrown";
+    error: unknown;
+}
+export interface Interrupted {
+    type: "interrupted";
+    state: ReplayState;
+    interrupted: number[];
 }
 
-export class ReplayEngine<A extends unknown[], R> {
-    constructor(private readonly builder: Builder<A, R>) {}
+export class ReplayEngine {
+    constructor(private readonly builder: Builder) {}
 
-    async play(args: A) {
-        return await this.replay({ args });
+    async play() {
+        const state = create();
+        return await this.replay({ state });
     }
-    async replay(state: ReplayState<A>): Promise<ReplayResult<A, R>> {
+    async replay({ state }: { state: ReplayState }) {
         return await replayFunc(this.builder, state);
     }
+
+    static supply(result: Interrupted, value: unknown) {
+        const mut = mutate(result.state);
+        result.interrupted.forEach((op) => mut.done(op, value));
+    }
 }
 
-async function replayFunc<A extends unknown[], R>(
-    builder: (controls: ReplayControls, ...args: A) => R | Promise<R>,
-    state: ReplayState<A>,
-): Promise<ReplayResult<A, R>> {
-    function isReplaying() {}
-    function interrupt() {
-        return new Promise<never>(() => {});
+async function replayFunc(
+    builder: Builder,
+    state: ReplayState,
+): Promise<ReplayResult> {
+    // Define replay controls
+    const cur = cursor(state);
+    const boundary = resolver();
+    const interruptOps: Set<number> = new Set();
+    const actionOps: Set<number> = new Set();
+    async function interrupt(key?: string) {
+        return await cur.perform(async (op) => {
+            interruptOps.add(op);
+            await Promise.resolve(); // TODO: investigate removal
+            if (actionOps.size === 0) {
+                boundary.resolve();
+            }
+            await boom();
+        }, key);
     }
-    function op() {}
-    function checkPoint() {}
-    function rewind() {}
-    // etc
+    async function action(
+        fn: () => unknown | Promise<unknown>,
+        key?: string,
+    ) {
+        return await cur.perform(async (op) => {
+            actionOps.add(op);
+            const res = await fn();
+            actionOps.delete(op);
+            if (actionOps.size === 0 && interruptOps.size > 0) {
+                boundary.resolve();
+            }
+            return res;
+        }, key);
+    }
+    const controls: ReplayControls = { interrupt, action };
 
-    const controls: ReplayControls = { interrupt };
-    const r = await builder(controls, ...state.args);
-    return { returned: r, state };
+    // Perform replay
+    let returned = false;
+    let returnValue: unknown = undefined;
+    async function run() {
+        returnValue = await builder(controls);
+        returned = true;
+    }
+    try {
+        await Promise.race([boundary.promise, run()]);
+        if (boundary.isResolved()) {
+            return {
+                type: "interrupted",
+                state,
+                interrupted: Array.from(interruptOps),
+            };
+        } else if (returned) return { type: "returned", returnValue };
+        else throw new Error("Neither returned nor interrupted!"); // should never happen
+    } catch (error) {
+        return { type: "thrown", error };
+    } finally {
+        // TODO: rely on `using` once it is stable
+        cur.close();
+    }
+}
+
+function boom() {
+    return new Promise<never>(() => {});
 }

@@ -1,8 +1,9 @@
-import { assertEquals } from "https://deno.land/std@0.177.1/testing/asserts.ts";
+import {
+    assert,
+    assertEquals,
+} from "https://deno.land/std@0.177.1/testing/asserts.ts";
 import { describe, it } from "https://deno.land/std@0.177.1/testing/bdd.ts";
 import {
-    assertSpyCall,
-    assertSpyCallArg,
     assertSpyCalls,
     spy,
 } from "https://deno.land/std@0.177.1/testing/mock.ts";
@@ -10,29 +11,25 @@ import { type ReplayControls, ReplayEngine } from "../src/engine.ts";
 
 describe("ReplayEngine", () => {
     it("should run the builder function", async () => {
-        const arg = "input";
-        const out = Promise.resolve("output");
-        const builder = spy((_c: ReplayControls, s: string) => {
-            assertEquals(s, arg);
-            return out;
-        });
+        const builder = spy(() => {});
         const engine = new ReplayEngine(builder);
-        const res = await engine.play([arg]);
-        assertEquals(res.returned, await out);
+        const result = await engine.play();
+        assertEquals(result.type, "returned");
         assertSpyCalls(builder, 1);
-        assertSpyCall(builder, 0, { returned: out });
-        assertSpyCallArg(builder, 0, 1, arg);
     });
-    it("should replay with the same arguments", async () => {
-        const arg = "input";
-        const builder = spy((_c: ReplayControls, s: string) => {
-            assertEquals(s, arg);
+    it("should replay until a return value", async () => {
+        const builder = spy(async (c: ReplayControls) => {
+            await c.interrupt();
+            await c.interrupt();
         });
         const engine = new ReplayEngine(builder);
-        const { state } = await engine.play([arg]);
-        await engine.replay(state);
-        assertSpyCalls(builder, 2);
-        assertSpyCallArg(builder, 0, 1, arg);
-        assertSpyCallArg(builder, 1, 1, arg);
+        let result = await engine.play();
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result, "zero");
+        result = await engine.replay(result);
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result, "one");
+        result = await engine.replay(result);
+        assert(result.type === "returned");
     });
 });
