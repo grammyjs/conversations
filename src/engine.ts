@@ -57,7 +57,6 @@ async function replayFunc(
     async function interrupt(key?: string) {
         return await cur.perform(async (op) => {
             interruptOps.add(op);
-            await Promise.resolve(); // TODO: investigate removal
             if (actionOps.size === 0) {
                 boundary.resolve();
             }
