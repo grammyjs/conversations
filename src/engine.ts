@@ -3,7 +3,10 @@ import { create, cursor, mutate, type ReplayState } from "./state.ts";
 
 export interface ReplayControls {
     interrupt(key?: string): Promise<unknown>;
-    action(fn: () => Promise<unknown>, key?: string): Promise<unknown>;
+    action(
+        fn: () => unknown | Promise<unknown>,
+        key?: string,
+    ): Promise<unknown>;
 }
 export type Builder = (controls: ReplayControls) => void | Promise<void>;
 
