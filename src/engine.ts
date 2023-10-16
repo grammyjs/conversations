@@ -38,7 +38,10 @@ export class ReplayEngine {
 
     static supply(result: Interrupted, value: unknown) {
         const mut = mutate(result.state);
-        result.interrupted.forEach((op) => mut.done(op, value));
+        if (result.interrupted.length === 0) {
+            throw new Error("No interruptions in state!"); // should never happen
+        }
+        mut.done(result.interrupted[0], value);
     }
 }
 
