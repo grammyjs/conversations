@@ -1,12 +1,13 @@
+import { resolver } from "../src/resolve.ts";
+import { create, cursor, inspect, mutate } from "../src/state.ts";
 import {
     assertEquals,
     assertInstanceOf,
     assertRejects,
     assertThrows,
-} from "https://deno.land/std@0.177.1/testing/asserts.ts";
-import { describe, it } from "https://deno.land/std@0.177.1/testing/bdd.ts";
-import { create, cursor, inspect, mutate } from "../src/state.ts";
-import { resolver } from "../src/resolve.ts";
+    describe,
+    it,
+} from "./deps.test.ts";
 
 describe("create", () => {
     it("creates replay state", () => {

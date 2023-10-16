@@ -1,14 +1,13 @@
+import { type ReplayControls, ReplayEngine } from "../src/engine.ts";
 import {
     assert,
     assertEquals,
-} from "https://deno.land/std@0.177.1/testing/asserts.ts";
-import { describe, it } from "https://deno.land/std@0.177.1/testing/bdd.ts";
-import {
     assertSpyCall,
     assertSpyCalls,
+    describe,
+    it,
     spy,
-} from "https://deno.land/std@0.177.1/testing/mock.ts";
-import { type ReplayControls, ReplayEngine } from "../src/engine.ts";
+} from "./deps.test.ts";
 
 describe("ReplayEngine", () => {
     it("should run the builder function", async () => {

@@ -2,8 +2,9 @@ import {
     assert,
     assertEquals,
     assertFalse,
-} from "https://deno.land/std@0.177.1/testing/asserts.ts";
-import { describe, it } from "https://deno.land/std@0.177.1/testing/bdd.ts";
+    describe,
+    it,
+} from "./deps.test.ts";
 import { resolver } from "../src/resolve.ts";
 
 describe("resolver", () => {
