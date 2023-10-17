@@ -242,4 +242,28 @@ describe("ReplayEngine", () => {
             returned: new Promise(() => {/* pending */}),
         });
     });
+    it("supports floating cancel ops", async () => {
+        let i = 0;
+        const builder = spy(async (c: ReplayControls) => {
+            const res0 = await c.interrupt();
+            assertEquals(res0, "zero");
+            c.cancel();
+            const res1 = await c.interrupt();
+            assertEquals(res1, "one");
+            i++;
+        });
+        const engine = new ReplayEngine(builder);
+        let result = await engine.play();
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result.state, result.interrupts[0], "zero");
+        result = await engine.replay(result.state);
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result.state, result.interrupts[0], "one");
+        result = await engine.replay(result.state);
+        // interrupted due to cancel
+        assert(result.type === "interrupted");
+        assertEquals(result.interrupts, []);
+        assertSpyCalls(builder, 3);
+        assertEquals(i, 1);
+    });
 });
