@@ -50,10 +50,10 @@ async function replayFunc(
     // Define replay controls
     const cur = cursor(state);
     const boundary = resolver();
-    const interruptOps: number[] = [];
+    const interrupts: number[] = [];
     async function interrupt(key?: string) {
         return await cur.perform(async (op) => {
-            interruptOps.push(op);
+            interrupts.push(op);
             boundary.resolve();
             await boom();
         }, key);
@@ -80,13 +80,12 @@ async function replayFunc(
     try {
         await Promise.race([boundary.promise, run()]);
         if (boundary.isResolved()) {
-            return {
-                type: "interrupted",
-                state,
-                interrupts: Array.from(interruptOps),
-            };
-        } else if (returned) return { type: "returned", returnValue };
-        else throw new Error("Neither returned nor interrupted!"); // should never happen
+            return { type: "interrupted", state, interrupts };
+        } else if (returned) {
+            return { type: "returned", returnValue };
+        } else {
+            throw new Error("Neither returned nor interrupted!"); // should never happen
+        }
     } catch (error) {
         return { type: "thrown", error };
     }
