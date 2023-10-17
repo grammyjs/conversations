@@ -44,12 +44,20 @@ export function mutate(state: ReplayState) {
         state.send.push({ payload });
         return index;
     }
-    function done(op: number, result: unknown) {
+    function validateOp(op: number) {
         if (op < 0) throw new Error(`Op ${op} is invalid`);
         if (op >= state.send.length) throw new Error(`No op ${op} in state`);
+    }
+    function done(op: number, result: unknown) {
+        validateOp(op);
         state.receive.push({ send: op, returnValue: result });
     }
-    return { op, done };
+    function undo(op: number) {
+        validateOp(op);
+        state.send.splice(op);
+        state.receive = state.receive.filter((r) => r.send < op);
+    }
+    return { op, done, undo };
 }
 
 export function cursor(state: ReplayState) {

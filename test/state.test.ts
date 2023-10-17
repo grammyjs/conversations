@@ -53,6 +53,25 @@ describe("mutate and inspect", () => {
         assertThrows(() => mut.done(3, "result"));
         mut.done(op0, "result");
     });
+    it("can undo mutations", () => {
+        const state = create();
+        const mut = mutate(state);
+        const op0 = mut.op("zero");
+        const op1 = mut.op("one");
+        const op2 = mut.op("two");
+        mut.done(op1, "def");
+        mut.done(op2, "ghi");
+        mut.undo(op1);
+        const op3 = mut.op("three");
+        mut.done(op0, "abc");
+        mut.done(op3, "jkl");
+
+        const get = inspect(state);
+        assertEquals(get.opCount(), 2);
+        assertEquals(get.payload(op0), "zero");
+        assertEquals(get.payload(op3), "three");
+        assertEquals(get.doneCount(), 2);
+    });
 });
 
 describe("cursor", () => {
