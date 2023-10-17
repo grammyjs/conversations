@@ -2,6 +2,7 @@ import { type ReplayControls, ReplayEngine } from "../src/engine.ts";
 import {
     assert,
     assertEquals,
+    assertGreater,
     assertSpyCall,
     assertSpyCalls,
     describe,
@@ -27,11 +28,11 @@ describe("ReplayEngine", () => {
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
         assert(result.type === "interrupted");
-        ReplayEngine.supply(result, "zero");
-        result = await engine.replay(result);
+        ReplayEngine.supply(result.state, result.interrupts[0], "zero");
+        result = await engine.replay(result.state);
         assert(result.type === "interrupted");
-        ReplayEngine.supply(result, "one");
-        result = await engine.replay(result);
+        ReplayEngine.supply(result.state, result.interrupts[0], "one");
+        result = await engine.replay(result.state);
         assert(result.type === "returned");
         assertSpyCalls(builder, 3);
     });
@@ -49,8 +50,8 @@ describe("ReplayEngine", () => {
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
         assert(result.type === "interrupted");
-        ReplayEngine.supply(result, "inject");
-        result = await engine.replay(result);
+        ReplayEngine.supply(result.state, result.interrupts[0], "inject");
+        result = await engine.replay(result.state);
         assert(result.type === "returned");
         assertSpyCalls(builder, 2);
         assertSpyCall(builder, 1, { returned: Promise.resolve(undefined) });
@@ -73,8 +74,9 @@ describe("ReplayEngine", () => {
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
         assert(result.type === "interrupted");
-        ReplayEngine.supply(result, "inject");
-        result = await engine.replay(result);
+        assertGreater(result.interrupts.length, 0);
+        ReplayEngine.supply(result.state, result.interrupts[0], "inject");
+        result = await engine.replay(result.state);
         assert(result.type === "returned");
         assertEquals(i, 3);
         assertSpyCalls(builder, 2);
@@ -94,8 +96,8 @@ describe("ReplayEngine", () => {
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
         assert(result.type === "interrupted");
-        ReplayEngine.supply(result, "inject");
-        result = await engine.replay(result);
+        ReplayEngine.supply(result.state, result.interrupts[0], "inject");
+        result = await engine.replay(result.state);
         assert(result.type === "returned");
         assertSpyCalls(builder, 2);
         assertSpyCall(builder, 1, { returned: Promise.resolve(undefined) });
@@ -104,6 +106,32 @@ describe("ReplayEngine", () => {
         assertSpyCall(action, 0, { returned: Promise.resolve(0) });
         assertSpyCall(action, 1, { returned: Promise.resolve(1) });
         assertSpyCall(action, 2, { returned: Promise.resolve(2) });
+    });
+    it("should not wait for floating actions", async () => {
+        const action = spy(async () => {
+            await new Promise<void>((fixMyTest) => {
+                // never completes
+
+                // why tf do i need this? :(
+                fixMyTest();
+            });
+        });
+        const builder = spy(async (c: ReplayControls) => {
+            c.action(action);
+            await c.interrupt();
+            c.action(action);
+        });
+        const engine = new ReplayEngine(builder);
+        let result = await engine.play();
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result.state, result.interrupts[0], "inject");
+        result = await engine.replay(result.state);
+        assert(result.type === "returned");
+        assertSpyCalls(builder, 2);
+        assertSpyCall(builder, 1, { returned: Promise.resolve(undefined) });
+        assertSpyCalls(action, 2);
+        assertSpyCall(action, 0, { returned: Promise.resolve(undefined) });
+        assertSpyCall(action, 1, { returned: Promise.resolve(undefined) });
     });
     it("should support parallel interrupts", async () => {
         let i = 0;
@@ -146,8 +174,8 @@ describe("ReplayEngine", () => {
         for (const inject of ["one", "two", "three", "four", "five", "six"]) {
             if (result.type !== "interrupted") console.log(result);
             assert(result.type === "interrupted");
-            ReplayEngine.supply(result, inject);
-            result = await engine.replay(result);
+            ReplayEngine.supply(result.state, result.interrupts[0], inject);
+            result = await engine.replay(result.state);
         }
         assert(result.type === "returned");
         assertEquals(checkpoints, [
@@ -184,8 +212,8 @@ describe("ReplayEngine", () => {
         let result = await engine.play();
         for (const inject of ["never", "inject", "never"]) {
             assert(result.type === "interrupted");
-            ReplayEngine.supply(result, inject);
-            result = await engine.replay(result);
+            ReplayEngine.supply(result.state, result.interrupts[0], inject);
+            result = await engine.replay(result.state);
         }
         assert(result.type === "returned");
         assertSpyCalls(builder, 4);
@@ -194,5 +222,29 @@ describe("ReplayEngine", () => {
         assertSpyCalls(action, 2);
         assertSpyCall(action, 0, { returned: 0 });
         assertSpyCall(action, 1, { returned: 1 });
+    });
+    it("supports canceling", async () => {
+        let i = 0;
+        const builder = spy(async (c: ReplayControls) => {
+            const res = await c.action(() => i++);
+            assertEquals(res, i - 1);
+            await c.cancel();
+        });
+        const engine = new ReplayEngine(builder);
+        let result = await engine.play();
+        assertEquals(i, 1);
+        assert(result.type === "interrupted");
+        assertEquals(result.interrupts.length, 0);
+        result = await engine.replay(result.state);
+        assertEquals(i, 1);
+        assert(result.type === "interrupted");
+        assertEquals(result.interrupts.length, 0);
+        assertSpyCalls(builder, 2);
+        assertSpyCall(builder, 0, {
+            returned: new Promise(() => {/* pending */}),
+        });
+        assertSpyCall(builder, 1, {
+            returned: new Promise(() => {/* pending */}),
+        });
     });
 });

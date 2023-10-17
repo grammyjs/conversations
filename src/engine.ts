@@ -3,6 +3,7 @@ import { create, cursor, mutate, type ReplayState } from "./state.ts";
 
 export interface ReplayControls {
     interrupt(key?: string): Promise<unknown>;
+    cancel(): Promise<never>;
     action(
         fn: () => unknown | Promise<unknown>,
         key?: string,
@@ -22,7 +23,7 @@ export interface Thrown {
 export interface Interrupted {
     type: "interrupted";
     state: ReplayState;
-    interrupted: number[];
+    interrupts: number[];
 }
 
 export class ReplayEngine {
@@ -30,18 +31,15 @@ export class ReplayEngine {
 
     async play() {
         const state = create();
-        return await this.replay({ state });
+        return await this.replay(state);
     }
-    async replay({ state }: { state: ReplayState }) {
+    async replay(state: ReplayState) {
         return await replayFunc(this.builder, state);
     }
 
-    static supply(result: Interrupted, value: unknown) {
-        const mut = mutate(result.state);
-        if (result.interrupted.length === 0) {
-            throw new Error("No interruptions in state!"); // should never happen
-        }
-        mut.done(result.interrupted[0], value);
+    static supply(state: ReplayState, interrupt: number, value: unknown) {
+        const mut = mutate(state);
+        mut.done(interrupt, value);
     }
 }
 
@@ -52,32 +50,25 @@ async function replayFunc(
     // Define replay controls
     const cur = cursor(state);
     const boundary = resolver();
-    const interruptOps: Set<number> = new Set();
-    const actionOps: Set<number> = new Set();
+    const interruptOps: number[] = [];
     async function interrupt(key?: string) {
         return await cur.perform(async (op) => {
-            interruptOps.add(op);
-            if (actionOps.size === 0) {
-                boundary.resolve();
-            }
+            interruptOps.push(op);
+            boundary.resolve();
             await boom();
         }, key);
+    }
+    async function cancel() {
+        boundary.resolve();
+        return await boom();
     }
     async function action(
         fn: () => unknown | Promise<unknown>,
         key?: string,
     ) {
-        return await cur.perform(async (op) => {
-            actionOps.add(op);
-            const res = await fn();
-            actionOps.delete(op);
-            if (actionOps.size === 0 && interruptOps.size > 0) {
-                boundary.resolve();
-            }
-            return res;
-        }, key);
+        return await cur.perform(() => fn(), key);
     }
-    const controls: ReplayControls = { interrupt, action };
+    const controls: ReplayControls = { interrupt, cancel, action };
 
     // Perform replay
     let returned = false;
@@ -92,15 +83,12 @@ async function replayFunc(
             return {
                 type: "interrupted",
                 state,
-                interrupted: Array.from(interruptOps),
+                interrupts: Array.from(interruptOps),
             };
         } else if (returned) return { type: "returned", returnValue };
         else throw new Error("Neither returned nor interrupted!"); // should never happen
     } catch (error) {
         return { type: "thrown", error };
-    } finally {
-        // TODO: rely on `using` once it is stable
-        cur.close();
     }
 }
 
