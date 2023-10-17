@@ -109,11 +109,8 @@ describe("ReplayEngine", () => {
     });
     it("should not wait for floating actions", async () => {
         const action = spy(async () => {
-            await new Promise<void>((fixMyTest) => {
+            await new Promise<never>(() => {
                 // never completes
-
-                // why tf do i need this? :(
-                fixMyTest();
             });
         });
         const builder = spy(async (c: ReplayControls) => {
@@ -130,8 +127,6 @@ describe("ReplayEngine", () => {
         assertSpyCalls(builder, 2);
         assertSpyCall(builder, 1, { returned: Promise.resolve(undefined) });
         assertSpyCalls(action, 2);
-        assertSpyCall(action, 0, { returned: Promise.resolve(undefined) });
-        assertSpyCall(action, 1, { returned: Promise.resolve(undefined) });
     });
     it("should support parallel interrupts", async () => {
         let i = 0;
