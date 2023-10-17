@@ -18,15 +18,6 @@ export interface ReplayEvent {
     op: number;
     result: unknown;
 }
-function on(state: ReplayState, fn: () => void) {
-    (state[LISTENERS] ??= []).push(fn);
-}
-function off(state: ReplayState, fn: () => void) {
-    state[LISTENERS] = state[LISTENERS]?.filter((f) => f !== fn);
-}
-function notify(state: ReplayState) {
-    state[LISTENERS]?.forEach((fn) => fn());
-}
 
 export function create(): ReplayState {
     return { send: [], receive: [] };
@@ -51,27 +42,21 @@ export function mutate(state: ReplayState) {
     function op(payload?: string) {
         const index = state.send.length;
         state.send.push({ payload });
-        notify(state);
         return index;
     }
     function done(op: number, result: unknown) {
         if (op < 0) throw new Error(`Op ${op} is invalid`);
         if (op >= state.send.length) throw new Error(`No op ${op} in state`);
         state.receive.push({ send: op, returnValue: result });
-        notify(state);
     }
     return { op, done };
 }
 
 export function cursor(state: ReplayState) {
     let changes = resolver();
-    function listener() {
+    function notify() {
         changes.resolve();
         changes = resolver();
-    }
-    on(state, listener);
-    function close() {
-        off(state, listener);
     }
 
     let send = 0; // 0 <= send <= state.send.length
@@ -89,7 +74,7 @@ export function cursor(state: ReplayState) {
             state.send.push({ payload });
         }
         const index = send++;
-        notify(state);
+        notify();
         return index;
     }
     async function done(op: number, result: () => unknown | Promise<unknown>) {
@@ -108,7 +93,7 @@ export function cursor(state: ReplayState) {
             state.receive.push({ send: op, returnValue: data });
         }
         receive++;
-        notify(state);
+        notify();
         return data;
     }
 
@@ -120,5 +105,5 @@ export function cursor(state: ReplayState) {
         return await done(index, () => action(index));
     }
 
-    return { perform, op, done, close, [Symbol.dispose]: close };
+    return { perform, op, done };
 }

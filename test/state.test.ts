@@ -58,7 +58,7 @@ describe("mutate and inspect", () => {
 describe("cursor", () => {
     it("can build up state", async () => {
         const state = create();
-        using cur = cursor(state);
+        const cur = cursor(state);
         const op0 = cur.op("zero");
         const op1 = cur.op("one");
         const res1 = await cur.done(
@@ -77,7 +77,7 @@ describe("cursor", () => {
     });
     it("validates done calls", async () => {
         const state = create();
-        using cur = cursor(state);
+        const cur = cursor(state);
         await assertRejects(() => cur.done(-1, () => "result"));
         await assertRejects(() => cur.done(0, () => "result"));
         await assertRejects(() => cur.done(3, () => "result"));
@@ -97,7 +97,7 @@ describe("cursor", () => {
             m.done(op0, "def");
         }
 
-        using cur = cursor(state);
+        const cur = cursor(state);
         const op0 = cur.op("zero");
         const op1 = cur.op("one");
         const res1 = await cur.done(op1, nevErr);
@@ -115,14 +115,14 @@ describe("cursor", () => {
         const state = create();
 
         { // setup
-            using c = cursor(state);
+            const c = cursor(state);
             const op0 = c.op("zero");
             const op1 = c.op("one");
             await c.done(op1, () => "abc");
             await c.done(op0, () => "def");
         }
 
-        using cur = cursor(state);
+        const cur = cursor(state);
         const op0 = cur.op("zero");
         const op1 = cur.op("one");
         const res1 = await cur.done(op1, nevErr);
@@ -140,12 +140,12 @@ describe("cursor", () => {
         const state = create();
 
         { // setup
-            using c = cursor(state);
+            const c = cursor(state);
             c.op("zero");
             c.op("one");
         }
 
-        using cur = cursor(state);
+        const cur = cursor(state);
         const op0 = cur.op("zero");
         const op1 = cur.op("one");
 
@@ -159,14 +159,14 @@ describe("cursor", () => {
         const state = create();
 
         { // setup
-            using c = cursor(state);
+            const c = cursor(state);
             const op0 = c.op("zero");
             const op1 = c.op("one");
             await c.done(op1, () => "abc");
             await c.done(op0, () => "def");
         }
 
-        using cur = cursor(state);
+        const cur = cursor(state);
         cur.op("zero");
         assertThrows(() => cur.op("nope"));
     });
@@ -174,7 +174,7 @@ describe("cursor", () => {
         const state = create();
 
         { // setup
-            using c = cursor(state);
+            const c = cursor(state);
             const op0 = c.op("zero");
             const op1 = c.op("one");
             const op2 = c.op("two");
@@ -186,7 +186,7 @@ describe("cursor", () => {
             ]);
         }
 
-        using cur = cursor(state);
+        const cur = cursor(state);
         const op0 = cur.op("zero");
         const op1 = cur.op("one");
         const op2 = cur.op("two");
@@ -211,7 +211,7 @@ describe("cursor", () => {
     });
     it("supports implicit op identifier handling", async () => {
         const state = create();
-        using cur = cursor(state);
+        const cur = cursor(state);
         let op = -1;
         const res = await cur.perform((o) => {
             op = o;
@@ -231,7 +231,7 @@ describe("cursor", () => {
             i: Math.random(),
         }));
 
-        using c = cursor(state);
+        const c = cursor(state);
         const ps0 = rsr
             .map(({ r, i }) => c.perform(() => r.promise, i.toString()));
         rsr.toSorted((l, r) => l.i - r.i)
@@ -239,7 +239,7 @@ describe("cursor", () => {
         const res0 = await Promise.all(ps0);
         assertEquals(res0, rsr.map(({ i }) => i));
 
-        using cur = cursor(state);
+        const cur = cursor(state);
         const order: unknown[] = [];
         const res1 = await Promise.all(
             rsr.map(({ i }, pos) =>
