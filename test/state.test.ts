@@ -280,6 +280,24 @@ describe("cursor", () => {
         assertEquals(get.opCount(), 10);
         assertEquals(get.doneCount(), 10);
     });
+    it("supports ops that never resolve", async () => {
+        const state = create();
+        const cur = cursor(state);
+        const r = resolver();
+        await Promise.race([
+            r,
+            cur.perform(async () => {
+                r.resolve();
+                await new Promise(() => {
+                    // never resolves
+                });
+            }, "payload"),
+            cur.perform(() => 42),
+        ]);
+        const get = inspect(state);
+        assertEquals(get.opCount(), 2);
+        assertEquals(get.doneCount(), 1);
+    });
 });
 
 function nevErr() {
