@@ -47,8 +47,9 @@ async function replayFunc(
     builder: Builder,
     state: ReplayState,
 ): Promise<ReplayResult> {
-    // Define replay controls
     const cur = cursor(state);
+
+    // Set up interrupt and action tracking
     let interrupted = false;
     const boundary = resolver();
     const interrupts: number[] = [];
@@ -58,6 +59,8 @@ async function replayFunc(
             boundary.resolve();
         }
     }
+
+    // Define replay controls
     async function interrupt(key?: string) {
         return await cur.perform(async (op) => {
             interrupted = true;
