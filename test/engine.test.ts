@@ -1,4 +1,5 @@
 import { type ReplayControls, ReplayEngine } from "../src/engine.ts";
+import { resolver } from "../src/resolve.ts";
 import {
     assert,
     assertEquals,
@@ -107,26 +108,52 @@ describe("ReplayEngine", () => {
         assertSpyCall(action, 1, { returned: Promise.resolve(1) });
         assertSpyCall(action, 2, { returned: Promise.resolve(2) });
     });
-    it("should not wait for floating actions", async () => {
+    it("should wait for floating actions", async () => {
+        let resolveAction = resolver();
+        let resolvePlay = resolver();
         const action = spy(async () => {
-            await new Promise<never>(() => {
-                // never completes
-            });
+            await resolveAction.promise;
         });
         const builder = spy(async (c: ReplayControls) => {
             c.action(action);
-            await c.interrupt();
+            resolvePlay.resolve();
+            const inject = await c.interrupt();
+            assertEquals(inject, "inject");
             c.action(action);
+            resolvePlay.resolve();
         });
         const engine = new ReplayEngine(builder);
-        let result = await engine.play();
+
+        let resultP = engine.play();
+        await resolvePlay.promise;
+        resolvePlay = resolver();
+        assertSpyCalls(action, 1);
+        assertSpyCall(action, 0, {
+            returned: new Promise<never>(() => {/* pending */}),
+        });
+        resolveAction.resolve();
+        resolveAction = resolver();
+        let result = await resultP;
         assert(result.type === "interrupted");
+        assertSpyCalls(action, 1);
+        assertSpyCall(action, 0, {
+            returned: new Promise<never>(() => {/* pending */}),
+        });
+
         ReplayEngine.supply(result.state, result.interrupts[0], "inject");
-        result = await engine.replay(result.state);
+        resultP = engine.replay(result.state);
+        await resolvePlay.promise;
+        assertSpyCalls(action, 1);
+        resolveAction.resolve();
+        result = await resultP;
+        assertSpyCalls(action, 2);
+        assertSpyCall(action, 1, {
+            returned: new Promise<never>(() => {/* pending */}),
+        });
         assert(result.type === "returned");
         assertSpyCalls(builder, 2);
-        assertSpyCall(builder, 1, { returned: Promise.resolve(undefined) });
         assertSpyCalls(action, 2);
+        assertSpyCall(action, 1, { returned: Promise.resolve(undefined) });
     });
     it("should support parallel interrupts", async () => {
         let i = 0;

@@ -49,24 +49,39 @@ async function replayFunc(
 ): Promise<ReplayResult> {
     // Define replay controls
     const cur = cursor(state);
+    let interrupted = false;
     const boundary = resolver();
     const interrupts: number[] = [];
+    const actions = new Set<number>();
+    function updateBoundary() {
+        if (interrupted && actions.size === 0) {
+            boundary.resolve();
+        }
+    }
     async function interrupt(key?: string) {
         return await cur.perform(async (op) => {
+            interrupted = true;
             interrupts.push(op);
-            boundary.resolve();
+            updateBoundary();
             await boom();
         }, key);
     }
     async function cancel() {
-        boundary.resolve();
+        interrupted = true;
+        updateBoundary();
         return await boom();
     }
     async function action(
         fn: () => unknown | Promise<unknown>,
         key?: string,
     ) {
-        return await cur.perform(() => fn(), key);
+        return await cur.perform(async (op) => {
+            actions.add(op);
+            const ret = await fn();
+            actions.delete(op);
+            updateBoundary();
+            return ret;
+        }, key);
     }
     const controls: ReplayControls = { interrupt, cancel, action };
 
