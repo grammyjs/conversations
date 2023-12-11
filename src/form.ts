@@ -148,4 +148,25 @@ export class ConversationForm<C extends Context> {
         }
         return url;
     }
+    
+    /**
+     * Waits until the user sends a a valid Date, and returns this Date. If the user sends
+     * something that cannot be parsed to a Date by the global `Date` constructor,
+     * these updates will be skipped. You may specify the `otherwise` handler
+     * that is called in such cases. Among other things, this allows you to tell
+     * the user that they did not send a valid Date.
+     *
+     * @param otherwise Handler that will be run for skipped updates
+     * @returns The received date
+     */
+    async date(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
+        const ctx = await this.conversation.wait();
+        const text = ctx.msg?.text ?? ctx.msg?.caption ?? "";
+        let date = new Date(text);
+        if(date === "Invalid Date") {
+            await otherwise?.(ctx);
+            return await this.conversation.skip();
+        }
+        return date;
+    }
 }
