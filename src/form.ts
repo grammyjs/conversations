@@ -148,7 +148,7 @@ export class ConversationForm<C extends Context> {
         }
         return url;
     }
-    
+
     /**
      * Waits until the user sends a a valid Date, and returns this Date. If the user sends
      * something that cannot be parsed to a Date by the global `Date` constructor,
@@ -163,7 +163,7 @@ export class ConversationForm<C extends Context> {
         const ctx = await this.conversation.wait();
         const text = ctx.msg?.text ?? ctx.msg?.caption ?? "";
         const date = new Date(text);
-        if(date.toString() === "Invalid Date") {
+        if (date.toString() === "Invalid Date") {
             await otherwise?.(ctx);
             return await this.conversation.skip();
         }
