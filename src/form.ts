@@ -162,8 +162,8 @@ export class ConversationForm<C extends Context> {
     async date(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
         const ctx = await this.conversation.wait();
         const text = ctx.msg?.text ?? ctx.msg?.caption ?? "";
-        let date = new Date(text);
-        if(date === "Invalid Date") {
+        const date = new Date(text);
+        if(date.toString() === "Invalid Date") {
             await otherwise?.(ctx);
             return await this.conversation.skip();
         }
