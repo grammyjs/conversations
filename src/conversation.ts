@@ -1038,9 +1038,7 @@ export class ConversationHandle<C extends Context> {
      * @param opts Optional config for discarded updates
      */
     async waitForReaction(
-        reaction:
-            | ReactionTypeEmoji["emoji"]
-            | MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
+        reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
         opts?: OtherwiseConfig<C>,
     ): Promise<ReactionContext<C>> {
         return await this.waitUntil(Context.has.reaction(reaction), opts);
