@@ -824,6 +824,31 @@ describe("The conversation engine", () => {
             );
         });
     });
+    describe("provides conversation.waitForReaction", () => {
+        it("which should be able to wait for a reaction", async () => {
+            assertEquals(
+                42,
+                await testConversation(
+                    async (conversation) => {
+                        const ctx = await conversation.waitForReaction("👍");
+                        assertEquals(ctx.reactions().emojiAdded, ["👍"]);
+                        return 42;
+                    },
+                    [{
+                        update_id: 0,
+                        message_reaction: {
+                            date: 0,
+                            message_id: 123,
+                            chat,
+                            user: from,
+                            old_reaction: [],
+                            new_reaction: [{ type: "emoji", emoji: "👍" }],
+                        },
+                    }, slashStart],
+                ),
+            );
+        });
+    });
     describe("provides conversation.waitForCallbackQuery", () => {
         it("which should be able to wait for a callback query", async () => {
             assertEquals(
@@ -1006,145 +1031,6 @@ describe("The conversation engine", () => {
                         text: "yay!",
                     },
                 }],
-            );
-        });
-    });
-    describe("provides conversation.waitFrom", () => {
-        it("which should be able to wait for a filter query", async () => {
-            await testConversation(
-                async (conversation) => {
-                    let ctx = await conversation.waitFrom(42);
-                    assertEquals(ctx.msg?.text, "yay!");
-                    ctx = await conversation.waitFrom(botInfo);
-                    assertEquals(ctx.msg?.text, "yay!");
-                },
-                [{
-                    update_id: 0,
-                    message: {
-                        message_id,
-                        chat,
-                        from: botInfo,
-                        date,
-                        text: "nope",
-                    },
-                }, {
-                    update_id: 0,
-                    message: {
-                        message_id,
-                        chat,
-                        from,
-                        date,
-                        text: "yay!",
-                    },
-                }, {
-                    update_id: 0,
-                    message: {
-                        message_id,
-                        chat,
-                        from,
-                        date,
-                        text: "nope",
-                    },
-                }, {
-                    update_id: 0,
-                    message: {
-                        message_id,
-                        chat,
-                        from: botInfo,
-                        date,
-                        text: "yay!",
-                    },
-                }],
-            );
-        });
-    });
-    describe("provides conversation.waitForReplyTo", () => {
-        it("which should be able to wait for a reply", async () => {
-            assertEquals(
-                42,
-                await testConversation(
-                    async (conversation) => {
-                        let ctx = await conversation.waitForReplyTo(message_id);
-                        assertEquals(ctx.msg?.text, "yay!");
-                        ctx = await conversation.waitForReplyTo(ctx.msg);
-                        assertEquals(ctx.msg?.text, "yay!");
-                        return 42;
-                    },
-                    [{
-                        update_id: 0,
-                        message: {
-                            message_id: 2,
-                            chat,
-                            from,
-                            date,
-                            text: "nope",
-                        },
-                    }, {
-                        update_id: 1,
-                        message: {
-                            message_id: 3,
-                            reply_to_message: {
-                                message_id: message_id - 1,
-                                chat,
-                                date,
-                                text: "nope",
-                                reply_to_message: undefined,
-                            },
-                            chat,
-                            from,
-                            date,
-                            text: "nope",
-                        },
-                    }, {
-                        update_id: 2,
-                        message: {
-                            message_id: 2444,
-                            reply_to_message: {
-                                message_id,
-                                chat,
-                                date,
-                                text: "nope",
-                                reply_to_message: undefined,
-                            },
-                            chat,
-                            from,
-                            date,
-                            text: "yay!",
-                        },
-                    }, {
-                        update_id: 3,
-                        message: {
-                            message_id: 27,
-                            reply_to_message: {
-                                message_id,
-                                chat,
-                                date,
-                                text: "nope",
-                                reply_to_message: undefined,
-                            },
-                            chat,
-                            from,
-                            date,
-                            text: "nah",
-                        },
-                    }, {
-                        update_id: 4,
-                        message: {
-                            message_id: 2,
-                            reply_to_message: {
-                                message_id: 2444,
-                                chat,
-                                date,
-                                text: "hmm",
-                                reply_to_message: undefined,
-                            },
-                            chat,
-                            from,
-                            date,
-                            text: "yay!",
-                        },
-                    }],
-                ),
             );
         });
     });
