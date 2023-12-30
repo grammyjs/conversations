@@ -17,6 +17,9 @@ import {
     type Middleware,
     type MiddlewareFn,
     type RawApi,
+    type ReactionContext,
+    type ReactionType,
+    type ReactionTypeEmoji,
     type SessionFlavor,
     type Update,
     type User,
@@ -812,8 +815,8 @@ export class ConversationHandle<C extends Context> {
             this.replayIndex.api ??= new Map();
             this.replayIndex.api.set(method, index);
         }
-        const result =
-            this.data.log.u[this.replayIndex.wait - 1].a?.[method][index];
+        const result = this.data.log.u[this.replayIndex.wait - 1].a
+            ?.[method][index];
         this.replayIndex.api?.set(method, 1 + index);
         if (result === undefined) {
             return new Promise<never>(() => {});
@@ -1025,6 +1028,20 @@ export class ConversationHandle<C extends Context> {
         opts?: OtherwiseConfig<C>,
     ): Promise<CommandContext<C>> {
         return await this.waitUntil(Context.has.command(command), opts);
+    }
+
+    /**
+     * Waits for the specified reaction. This uses the same logic as
+     * `bot.reaction`.
+     *
+     * @param reaction The reaction to wait for
+     * @param opts Optional config for discarded updates
+     */
+    async waitForReaction(
+        reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
+        opts?: OtherwiseConfig<C>,
+    ): Promise<ReactionContext<C>> {
+        return await this.waitUntil(Context.has.reaction(reaction), opts);
     }
 
     /**

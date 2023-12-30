@@ -17,12 +17,11 @@
         "backport": "deno2node tsconfig.json"
     },
     "dependencies": {
-        "@grammyjs/types": "^3.1.1",
         "debug": "^4.3.4",
         "o-son": "^1.0.1"
     },
     "peerDependencies": {
-        "grammy": "^1.10.0"
+        "grammy": "^1.20.1"
     },
     "devDependencies": {
         "@types/debug": "^4.1.8",
