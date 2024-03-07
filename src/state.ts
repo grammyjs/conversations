@@ -1,8 +1,8 @@
 import { resolver } from "./resolve.ts";
 
-const LISTENERS = Symbol.for("grammy.conversations.replay.listener");
+// const LISTENERS = Symbol.for("grammy.conversations.replay.listener");
 export interface ReplayState {
-    [LISTENERS]?: Array<() => void>;
+    // [LISTENERS]?: Array<() => void>;
     send: SendOp[];
     receive: ReceiveOp[];
 }
@@ -101,7 +101,7 @@ export function cursor(state: ReplayState) {
                 }
             }
             data = state.receive[receive].returnValue;
-        } else {
+        } else { // receive === state.receive.length
             data = await result();
             state.receive.push({ send: op, returnValue: data });
         }
