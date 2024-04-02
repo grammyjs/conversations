@@ -960,7 +960,7 @@ export class ConversationHandle<C extends Context> {
         opts?: OtherwiseConfig<C>,
     ): Promise<C> {
         const { otherwise, drop, maxMilliseconds } = toObj(opts);
-        const ctx = await this.wait({ maxMilliseconds });
+        const ctx = maxMilliseconds ? await this.wait({ maxMilliseconds }) : await this.wait();
         if (!await predicate(ctx)) {
             await otherwise?.(ctx);
             await this.skip({ drop });
