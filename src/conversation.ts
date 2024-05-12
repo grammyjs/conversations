@@ -607,7 +607,7 @@ export function createConversation<C extends Context>(
                     op = await runUntilComplete(session.conversation[id]);
                 } finally {
                     // Clean up if no logs remain
-                    if (session.conversation[id].length === 0) {
+                    if (session.conversation?.[id].length === 0) {
                         delete session.conversation[id];
                     }
                 }
