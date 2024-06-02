@@ -174,7 +174,7 @@ describe("cursor", () => {
         assertEquals(get.payload(op1), "one");
         assertEquals(get.doneCount(), 0);
     });
-    it("can detect bad replays", async () => {
+    it("can detect bad replays based on the payload", async () => {
         const state = create();
 
         { // setup
