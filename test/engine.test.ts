@@ -245,6 +245,46 @@ describe("ReplayEngine", () => {
         assertSpyCall(action, 0, { returned: 0 });
         assertSpyCall(action, 1, { returned: 1 });
     });
+    it("should support cascading interrupts and actions", async () => {
+        let inner = false;
+        let i = 0;
+        const action = spy(() => i++);
+        const builder = spy((c: ReplayControls) => {
+            c.interrupt().then((i0) => {
+                assertEquals(i0, "one");
+                c.action(action).then((r0) => {
+                    assertEquals(r0, 0);
+                    c.interrupt().then((i1) => {
+                        assertEquals(i1, "two");
+                        c.action(action).then(async (r1) => {
+                            assertEquals(r1, 1);
+                            assertEquals(await c.interrupt(), "three");
+                            inner = true;
+                        });
+                    });
+                });
+            });
+        });
+        const engine = new ReplayEngine(builder);
+        let result = await engine.play();
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result.state, result.interrupts[0], "one");
+        result = await engine.replay(result.state);
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result.state, result.interrupts[0], "two");
+        result = await engine.replay(result.state);
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(result.state, result.interrupts[0], "three");
+        result = await engine.replay(result.state);
+        assert(inner);
+        assert(result.type === "returned");
+        assertSpyCalls(builder, 4);
+        assertSpyCall(builder, 3, { returned: undefined });
+        assertEquals(i, 2);
+        assertSpyCalls(action, 2);
+        assertSpyCall(action, 0, { returned: 0 });
+        assertSpyCall(action, 1, { returned: 1 });
+    });
     it("supports canceling", async () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
