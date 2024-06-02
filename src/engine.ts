@@ -3,11 +3,11 @@ import { create, cursor, mutate, type ReplayState } from "./state.ts";
 
 export interface ReplayControls {
     interrupt(key?: string): Promise<unknown>;
-    cancel(): Promise<never>;
-    action(
-        fn: () => unknown | Promise<unknown>,
+    cancel(key?: string): Promise<never>;
+    action<R = unknown>(
+        fn: () => R | Promise<R>,
         key?: string,
-    ): Promise<unknown>;
+    ): Promise<R>;
 }
 export type Builder = (controls: ReplayControls) => void | Promise<void>;
 
@@ -22,6 +22,7 @@ export interface Thrown {
 }
 export interface Interrupted {
     type: "interrupted";
+    message?: string;
     state: ReplayState;
     interrupts: number[];
 }
@@ -51,8 +52,9 @@ async function replayState(
 
     // Set up interrupt and action tracking
     let interrupted = false;
-    const boundary = resolver();
     const interrupts: number[] = [];
+    let message: string | undefined = undefined;
+    const boundary = resolver();
     const actions = new Set<number>();
     function updateBoundary() {
         if (interrupted && actions.size === 0) {
@@ -62,7 +64,7 @@ async function replayState(
 
     // Set up event loop tracking to prevent
     // premature returns with floating promises
-    let promises = 0; // counts the number of actions on the event loop
+    let promises = 0; // counts the number of promises on the event loop
     let dirty = resolver(); // resolves as soon as the event loop is clear
     function begin() {
         promises++;
@@ -80,6 +82,7 @@ async function replayState(
         begin();
         const res = await cur.perform(async (op) => {
             interrupted = true;
+            message = key;
             interrupts.push(op);
             updateBoundary();
             await boom();
@@ -87,15 +90,13 @@ async function replayState(
         end();
         return res;
     }
-    async function cancel() {
+    async function cancel(key?: string) {
         interrupted = true;
+        message = key;
         updateBoundary();
         return await boom();
     }
-    async function action(
-        fn: () => unknown | Promise<unknown>,
-        key?: string,
-    ) {
+    async function action<R>(fn: () => R | Promise<R>, key?: string) {
         begin();
         const res = await cur.perform(async (op) => {
             actions.add(op);
@@ -103,7 +104,7 @@ async function replayState(
             actions.delete(op);
             updateBoundary();
             return ret;
-        }, key);
+        }, key) as R;
         end();
         return res;
     }
@@ -123,7 +124,7 @@ async function replayState(
     try {
         await Promise.race([boundary.promise, run()]);
         if (boundary.isResolved()) {
-            return { type: "interrupted", state, interrupts };
+            return { type: "interrupted", message, state, interrupts };
         } else if (returned) {
             return { type: "returned", returnValue };
         } else {
