@@ -41,7 +41,7 @@ export function inspect(state: ReplayState) {
 export function mutate(state: ReplayState) {
     function op(payload?: string) {
         const index = state.send.length;
-        state.send.push({ payload });
+        state.send.push(payload === undefined ? {} : { payload });
         return index;
     }
     function validateOp(op: number) {
@@ -79,7 +79,7 @@ export function cursor(state: ReplayState) {
             }
         } else { // send === state.send.length
             // log new data
-            state.send.push({ payload });
+            state.send.push(payload === undefined ? {} : { payload });
         }
         const index = send++;
         notify();
@@ -99,7 +99,7 @@ export function cursor(state: ReplayState) {
                     // the replay completed and we are still here.
                     return;
                 }
-            }
+            } // state.receive[receive].send === op
             data = state.receive[receive].returnValue;
         } else { // receive === state.receive.length
             data = await result();

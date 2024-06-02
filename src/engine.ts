@@ -34,7 +34,7 @@ export class ReplayEngine {
         return await this.replay(state);
     }
     async replay(state: ReplayState) {
-        return await replayFunc(this.builder, state);
+        return await replayState(this.builder, state);
     }
 
     static supply(state: ReplayState, interrupt: number, value: unknown) {
@@ -43,7 +43,7 @@ export class ReplayEngine {
     }
 }
 
-async function replayFunc(
+async function replayState(
     builder: Builder,
     state: ReplayState,
 ): Promise<ReplayResult> {
