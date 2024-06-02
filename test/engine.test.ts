@@ -267,17 +267,13 @@ describe("ReplayEngine", () => {
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
-        assert(result.type === "interrupted");
-        ReplayEngine.supply(result.state, result.interrupts[0], "one");
-        result = await engine.replay(result.state);
-        assert(result.type === "interrupted");
-        ReplayEngine.supply(result.state, result.interrupts[0], "two");
-        result = await engine.replay(result.state);
-        assert(result.type === "interrupted");
-        ReplayEngine.supply(result.state, result.interrupts[0], "three");
-        result = await engine.replay(result.state);
-        assert(inner);
+        for (const inject of ["one", "two", "three"]) {
+            assert(result.type === "interrupted");
+            ReplayEngine.supply(result.state, result.interrupts[0], inject);
+            result = await engine.replay(result.state);
+        }
         assert(result.type === "returned");
+        assert(inner);
         assertSpyCalls(builder, 4);
         assertSpyCall(builder, 3, { returned: undefined });
         assertEquals(i, 2);
