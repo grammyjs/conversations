@@ -60,14 +60,32 @@ async function replayState(
         }
     }
 
+    // Set up event loop tracking to prevent
+    // premature returns with floating promises
+    let promises = 0; // counts the number of actions on the event loop
+    let dirty = resolver(); // resolves as soon as the event loop is clear
+    function begin() {
+        promises++;
+    }
+    function end() {
+        promises--;
+        if (promises === 0) {
+            dirty.resolve();
+            dirty = resolver();
+        }
+    }
+
     // Define replay controls
     async function interrupt(key?: string) {
-        return await cur.perform(async (op) => {
+        begin();
+        const res = await cur.perform(async (op) => {
             interrupted = true;
             interrupts.push(op);
             updateBoundary();
             await boom();
         }, key);
+        end();
+        return res;
     }
     async function cancel() {
         interrupted = true;
@@ -78,13 +96,16 @@ async function replayState(
         fn: () => unknown | Promise<unknown>,
         key?: string,
     ) {
-        return await cur.perform(async (op) => {
+        begin();
+        const res = await cur.perform(async (op) => {
             actions.add(op);
             const ret = await fn();
             actions.delete(op);
             updateBoundary();
             return ret;
         }, key);
+        end();
+        return res;
     }
     const controls: ReplayControls = { interrupt, cancel, action };
 
@@ -93,6 +114,10 @@ async function replayState(
     let returnValue: unknown = undefined;
     async function run() {
         returnValue = await builder(controls);
+        while (promises > 0) {
+            await dirty.promise;
+            await 0; // move to end of event loop by spinning it
+        }
         returned = true;
     }
     try {
