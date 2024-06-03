@@ -119,7 +119,28 @@ export class Conversation<C extends Context> {
 
 export interface ConversationState {
     args: string;
-    execution: ReplayState;
+    replay: ReplayState;
+    interrupts: number[];
+}
+export type ConversationResult =
+    | ConversationComplete
+    | ConversationError
+    | ConversationHandled
+    | ConversationSkipped;
+export interface ConversationComplete {
+    status: "complete";
+}
+export interface ConversationError {
+    status: "error";
+    error: unknown;
+}
+export interface ConversationHandled {
+    status: "handled";
+    replay: ReplayState;
+    interrupts: number[];
+}
+export interface ConversationSkipped {
+    status: "skipped";
 }
 
 export type ConversationBuilder<C extends Context> = (
@@ -138,38 +159,63 @@ export async function enterConversation<C extends Context>(
     ...args: any[]
 ) {
     const packedArgs = JSON.stringify(args);
-    const initialState = ReplayEngine.init();
-    // TODO: we cannot supply a received update before we are waiting for it,
-    // and we cannot wait for an update without receiving it first. How should
-    // this be solved?
-    ReplayEngine.supply(initialState, 0, update);
+    const initialState = ReplayEngine.init(update);
     const state: ConversationState = {
         args: packedArgs,
-        execution: initialState,
+        replay: initialState,
+        interrupts: [],
     };
     return await resumeConversation(conversation, update, api, me, state);
 }
-export async function resumeConversation<
-    C extends Context,
-    // deno-lint-ignore no-explicit-any
-    A extends any[] = [],
->(
-    conversation: ConversationBuilder<C, A>,
+
+export async function resumeConversation<C extends Context>(
+    conversation: ConversationBuilder<C>,
     update: Update,
     api: Api,
     me: UserFromGetMe,
     state: ConversationState,
-) {
+): Promise<ConversationResult> {
     const args = JSON.parse(state.args);
-    const execution = state.execution;
     const engine = new ReplayEngine(async (controls) => {
         const hydrate = hydrateContext<C>(controls, api, me);
         const convo = new Conversation(controls, hydrate);
         const ctx = await convo.wait();
         await conversation(convo, ctx, ...args);
     });
-
-    // TODO: supply new update
-    await engine.replay(execution);
-    // TODO: remaining steps
+    const replayState = state.replay;
+    // The last execution may have completed with a number of interrupts
+    // (parallel wait calls, floating promises basically). We replay the
+    // conversation once for each of these interrupts until one of them does not
+    // skip the update (actually handles it in a meaningful way).
+    for (const int of state.interrupts) {
+        const checkpoint = ReplayEngine.supply(replayState, int, update);
+        const result = await engine.replay(replayState);
+        switch (result.type) {
+            case "returned":
+                // tell caller that we are done, all good
+                return { status: "complete" };
+            case "thrown":
+                // tell caller that an error was thrown, it should leave the
+                // conversation and rethrow the error
+                return { status: "error", error: result.error };
+            case "interrupted":
+                if (result.message === "skip") {
+                    // current interrupt was skipped, replay again with the next
+                    ReplayEngine.reset(replayState, checkpoint);
+                    continue;
+                } else if (result.message === "halt") {
+                    // tell caller that we are done, all good
+                    return { status: "complete" };
+                } else {
+                    // tell caller that we handled the update and updated the state
+                    return {
+                        status: "handled",
+                        replay: result.state,
+                        interrupts: result.interrupts,
+                    };
+                }
+        }
+    }
+    // tell caller that we want to skip the update and did not modify the state
+    return { status: "skipped" };
 }

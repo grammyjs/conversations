@@ -1,5 +1,12 @@
 import { resolver } from "./resolve.ts";
-import { create, cursor, mutate, type ReplayState } from "./state.ts";
+import {
+    type Checkpoint,
+    create,
+    cursor,
+    inspect,
+    mutate,
+    type ReplayState,
+} from "./state.ts";
 
 export interface ReplayControls {
     interrupt(key?: string): Promise<unknown>;
@@ -31,19 +38,30 @@ export class ReplayEngine {
     constructor(private readonly builder: Builder) {}
 
     async play() {
-        const state = ReplayEngine.init();
+        const state = create();
         return await this.replay(state);
     }
     async replay(state: ReplayState) {
         return await replayState(this.builder, state);
     }
 
-    static init() {
-        return create();
+    static init(first: unknown) {
+        const state = create();
+        const mut = mutate(state);
+        const op = mut.op();
+        mut.done(op, first);
+        return state;
     }
     static supply(state: ReplayState, interrupt: number, value: unknown) {
+        const get = inspect(state);
+        const checkpoint = get.checkpoint();
         const mut = mutate(state);
         mut.done(interrupt, value);
+        return checkpoint;
+    }
+    static reset(state: ReplayState, checkpoint: Checkpoint) {
+        const mut = mutate(state);
+        mut.reset(checkpoint);
     }
 }
 
@@ -120,7 +138,7 @@ async function replayState(
         returnValue = await builder(controls);
         while (promises > 0) {
             await dirty.promise;
-            await 0; // move to end of event loop by spinning it
+            await 0; // move to end of event loop by spinning it once more
         }
         returned = true;
     }
