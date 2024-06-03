@@ -14,10 +14,7 @@ interface ReceiveOp {
     returnValue: unknown;
 }
 
-export interface ReplayEvent {
-    op: number;
-    result: unknown;
-}
+export type Checkpoint = [number, number];
 
 export function create(): ReplayState {
     return { send: [], receive: [] };
@@ -35,29 +32,41 @@ export function inspect(state: ReplayState) {
         if (op > state.send.length) throw new Error(`No op ${op} in state`);
         return state.send[op].payload;
     }
-    return { opCount, doneCount, payload };
+    function checkpoint(): Checkpoint {
+        return [opCount(), doneCount()];
+    }
+    return { opCount, doneCount, payload, checkpoint };
 }
 
 export function mutate(state: ReplayState) {
+    function validateOp(op: number) {
+        if (op < 0) throw new Error(`Op ${op} is invalid`);
+        if (op >= state.send.length) throw new Error(`No op ${op} in state`);
+    }
+    function validateDone(done: number) {
+        if (done < 0) throw new Error(`Done ${done} is invalid`);
+        if (done >= state.receive.length) {
+            throw new Error(`No done ${done} in state`);
+        }
+    }
+
     function op(payload?: string) {
         const index = state.send.length;
         state.send.push(payload === undefined ? {} : { payload });
         return index;
     }
-    function validateOp(op: number) {
-        if (op < 0) throw new Error(`Op ${op} is invalid`);
-        if (op >= state.send.length) throw new Error(`No op ${op} in state`);
-    }
     function done(op: number, result: unknown) {
         validateOp(op);
         state.receive.push({ send: op, returnValue: result });
     }
-    function undo(op: number) {
+    function reset([op, done]: Checkpoint) {
         validateOp(op);
+        validateDone(done);
         state.send.splice(op);
-        state.receive = state.receive.filter((r) => r.send < op);
+        state.receive.splice(done);
     }
-    return { op, done, undo };
+
+    return { op, done, reset };
 }
 
 export function cursor(state: ReplayState) {
