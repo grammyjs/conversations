@@ -44,7 +44,10 @@ function hydrateContext<C extends Context>(
             if (ret.ok) {
                 return ret.res;
             } else {
-                throw new HttpError(ret.err.message, new Error(ret.err.error));
+                throw new HttpError(
+                    "Recovered error: " + ret.err.message,
+                    new Error(ret.err.error),
+                );
             }
         });
         const ctx = new Context(update, api, me) as C;
@@ -115,31 +118,58 @@ export class Conversation<C extends Context> {
 }
 
 export interface ConversationState {
-    id: string;
-    state: ReplayState;
+    args: string;
+    execution: ReplayState;
 }
 
-// deno-lint-ignore no-explicit-any
-export type ConversationBuilder<C extends Context, A extends any[] = []> = (
+export type ConversationBuilder<C extends Context> = (
     conversation: Conversation<C>,
     ctx: C,
-    ...args: A
+    // deno-lint-ignore no-explicit-any
+    ...args: any[]
 ) => void | Promise<void>;
 
-// deno-lint-ignore no-explicit-any
-export async function runConversation<C extends Context, A extends any[] = []>(
-    conversation: ConversationBuilder<C, A>,
-    { state }: ConversationState,
+export async function enterConversation<C extends Context>(
+    conversation: ConversationBuilder<C>,
     update: Update,
     api: Api,
     me: UserFromGetMe,
-    ...args: A
+    // deno-lint-ignore no-explicit-any
+    ...args: any[]
 ) {
+    const packedArgs = JSON.stringify(args);
+    const initialState = ReplayEngine.init();
+    // TODO: we cannot supply a received update before we are waiting for it,
+    // and we cannot wait for an update without receiving it first. How should
+    // this be solved?
+    ReplayEngine.supply(initialState, 0, update);
+    const state: ConversationState = {
+        args: packedArgs,
+        execution: initialState,
+    };
+    return await resumeConversation(conversation, update, api, me, state);
+}
+export async function resumeConversation<
+    C extends Context,
+    // deno-lint-ignore no-explicit-any
+    A extends any[] = [],
+>(
+    conversation: ConversationBuilder<C, A>,
+    update: Update,
+    api: Api,
+    me: UserFromGetMe,
+    state: ConversationState,
+) {
+    const args = JSON.parse(state.args);
+    const execution = state.execution;
     const engine = new ReplayEngine(async (controls) => {
         const hydrate = hydrateContext<C>(controls, api, me);
         const convo = new Conversation(controls, hydrate);
         const ctx = await convo.wait();
         await conversation(convo, ctx, ...args);
     });
-    // TODO: implement
+
+    // TODO: supply new update
+    await engine.replay(execution);
+    // TODO: remaining steps
 }
