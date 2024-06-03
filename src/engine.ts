@@ -31,13 +31,16 @@ export class ReplayEngine {
     constructor(private readonly builder: Builder) {}
 
     async play() {
-        const state = create();
+        const state = ReplayEngine.init();
         return await this.replay(state);
     }
     async replay(state: ReplayState) {
         return await replayState(this.builder, state);
     }
 
+    static init() {
+        return create();
+    }
     static supply(state: ReplayState, interrupt: number, value: unknown) {
         const mut = mutate(state);
         mut.done(interrupt, value);
