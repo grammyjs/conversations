@@ -4,11 +4,220 @@ import {
     Context,
     HttpError,
     type Middleware,
+    type MiddlewareFn,
     type Update,
     type UserFromGetMe,
 } from "./deps.deno.ts";
 import { type ReplayControls, ReplayEngine } from "./engine.ts";
 import { type ReplayState } from "./state.ts";
+
+const internal = Symbol("conversations");
+
+export interface ConversationOptions<C extends Context> {
+    read(ctx: C): ConversationData | Promise<ConversationData>;
+    write(ctx: C, state: ConversationData): void | Promise<void>;
+    delete(ctx: C): void | Promise<void>;
+}
+export interface ConversationData {
+    [id: string]: ConversationState[];
+}
+
+export function conversations<C extends Context>(
+    options: ConversationOptions<C>,
+): MiddlewareFn<C> {
+    return async (ctx, next) => {
+        let read = false;
+        const state = await options.read(ctx);
+        Object.defineProperty(ctx, internal, {
+            get() {
+                read = true;
+                return state; // will be mutated by conversations
+            },
+        });
+        await next();
+        if (read) {
+            if (Object.keys(state).length === 0) {
+                await options.delete(ctx);
+            } else {
+                await options.write(ctx, state);
+            }
+        }
+    };
+}
+
+export interface ConversationState {
+    args: string;
+    replay: ReplayState;
+    interrupts: number[];
+}
+export type ConversationResult =
+    | ConversationComplete
+    | ConversationError
+    | ConversationHandled
+    | ConversationSkipped;
+export interface ConversationComplete {
+    status: "complete";
+}
+export interface ConversationError {
+    status: "error";
+    error: unknown;
+}
+export interface ConversationHandled {
+    status: "handled";
+    replay: ReplayState;
+    interrupts: number[];
+}
+export interface ConversationSkipped {
+    status: "skipped";
+}
+
+export type ConversationBuilder<C extends Context> = (
+    conversation: Conversation<C>,
+    ctx: C,
+    // deno-lint-ignore no-explicit-any
+    ...args: any[]
+) => void | Promise<void>;
+// export interface ConversationConfig {
+//     id?: string;
+//     maxMillisecondsToWait?: number;
+// }
+
+export function createConversation<C extends Context>(
+    builder: ConversationBuilder<C>,
+    id: string = builder.name,
+): MiddlewareFn<C> {
+    if (id === undefined) {
+        throw new Error("Cannot register a conversation without a name!");
+    }
+    return async (ctx, next) => {
+        if (!(internal in ctx)) {
+            throw new Error(
+                "Cannot register a conversation without installing the conversations plugin first!",
+            );
+        }
+        const data = ctx[internal] as ConversationData;
+        const result = await runParallelConversations(
+            builder,
+            id,
+            data,
+            ctx.update,
+            ctx.api,
+            ctx.me,
+        );
+        switch (result.status) {
+            case "error":
+                throw result.error;
+            case "skipped":
+                await next();
+        }
+    };
+}
+
+export async function runParallelConversations<C extends Context>(
+    builder: ConversationBuilder<C>,
+    id: string,
+    data: ConversationData,
+    update: Update,
+    api: Api,
+    me: UserFromGetMe,
+): Promise<ConversationResult> {
+    if (!(id in data)) return { status: "skipped" };
+    const states = data[id];
+    const len = states.length;
+    for (let i = 0; i < len; i++) {
+        const result = await resumeConversation(
+            builder,
+            update,
+            api,
+            me,
+            states[i],
+        );
+        switch (result.status) {
+            case "skipped":
+                continue;
+            case "handled":
+                states[i].replay = result.replay;
+                states[i].interrupts = result.interrupts;
+                return result;
+            case "complete":
+            case "error":
+                states.splice(i, 1);
+                if (states.length === 0) delete data[id];
+                return result;
+        }
+    }
+    return { status: "skipped" };
+}
+
+export async function enterConversation<C extends Context>(
+    conversation: ConversationBuilder<C>,
+    update: Update,
+    api: Api,
+    me: UserFromGetMe,
+    // deno-lint-ignore no-explicit-any
+    ...args: any[]
+) {
+    const packedArgs = JSON.stringify(args);
+    const initialState = ReplayEngine.init(update);
+    const state: ConversationState = {
+        args: packedArgs,
+        replay: initialState,
+        interrupts: [],
+    };
+    return await resumeConversation(conversation, update, api, me, state);
+}
+
+export async function resumeConversation<C extends Context>(
+    conversation: ConversationBuilder<C>,
+    update: Update,
+    api: Api,
+    me: UserFromGetMe,
+    state: ConversationState,
+): Promise<ConversationResult> {
+    const args = JSON.parse(state.args);
+    const engine = new ReplayEngine(async (controls) => {
+        const hydrate = hydrateContext<C>(controls, api, me);
+        const convo = new Conversation(controls, hydrate);
+        const ctx = await convo.wait();
+        await conversation(convo, ctx, ...args);
+    });
+    const replayState = state.replay;
+    // The last execution may have completed with a number of interrupts
+    // (parallel wait calls, floating promises basically). We replay the
+    // conversation once for each of these interrupts until one of them does not
+    // skip the update (actually handles it in a meaningful way).
+    for (const int of state.interrupts) {
+        const checkpoint = ReplayEngine.supply(replayState, int, update);
+        const result = await engine.replay(replayState);
+        switch (result.type) {
+            case "returned":
+                // tell caller that we are done, all good
+                return { status: "complete" };
+            case "thrown":
+                // tell caller that an error was thrown, it should leave the
+                // conversation and rethrow the error
+                return { status: "error", error: result.error };
+            case "interrupted":
+                if (result.message === "skip") {
+                    // current interrupt was skipped, replay again with the next
+                    ReplayEngine.reset(replayState, checkpoint);
+                    continue;
+                } else if (result.message === "halt") {
+                    // tell caller that we are done, all good
+                    return { status: "complete" };
+                } else {
+                    // tell caller that we handled the update and updated the state
+                    return {
+                        status: "handled",
+                        replay: result.state,
+                        interrupts: result.interrupts,
+                    };
+                }
+        }
+    }
+    // tell caller that we want to skip the update and did not modify the state
+    return { status: "skipped" };
+}
 
 function hydrateContext<C extends Context>(
     controls: ReplayControls,
@@ -115,107 +324,4 @@ export class Conversation<C extends Context> {
         // TODO: implement
     }
     // TODO: add more methods
-}
-
-export interface ConversationState {
-    args: string;
-    replay: ReplayState;
-    interrupts: number[];
-}
-export type ConversationResult =
-    | ConversationComplete
-    | ConversationError
-    | ConversationHandled
-    | ConversationSkipped;
-export interface ConversationComplete {
-    status: "complete";
-}
-export interface ConversationError {
-    status: "error";
-    error: unknown;
-}
-export interface ConversationHandled {
-    status: "handled";
-    replay: ReplayState;
-    interrupts: number[];
-}
-export interface ConversationSkipped {
-    status: "skipped";
-}
-
-export type ConversationBuilder<C extends Context> = (
-    conversation: Conversation<C>,
-    ctx: C,
-    // deno-lint-ignore no-explicit-any
-    ...args: any[]
-) => void | Promise<void>;
-
-export async function enterConversation<C extends Context>(
-    conversation: ConversationBuilder<C>,
-    update: Update,
-    api: Api,
-    me: UserFromGetMe,
-    // deno-lint-ignore no-explicit-any
-    ...args: any[]
-) {
-    const packedArgs = JSON.stringify(args);
-    const initialState = ReplayEngine.init(update);
-    const state: ConversationState = {
-        args: packedArgs,
-        replay: initialState,
-        interrupts: [],
-    };
-    return await resumeConversation(conversation, update, api, me, state);
-}
-
-export async function resumeConversation<C extends Context>(
-    conversation: ConversationBuilder<C>,
-    update: Update,
-    api: Api,
-    me: UserFromGetMe,
-    state: ConversationState,
-): Promise<ConversationResult> {
-    const args = JSON.parse(state.args);
-    const engine = new ReplayEngine(async (controls) => {
-        const hydrate = hydrateContext<C>(controls, api, me);
-        const convo = new Conversation(controls, hydrate);
-        const ctx = await convo.wait();
-        await conversation(convo, ctx, ...args);
-    });
-    const replayState = state.replay;
-    // The last execution may have completed with a number of interrupts
-    // (parallel wait calls, floating promises basically). We replay the
-    // conversation once for each of these interrupts until one of them does not
-    // skip the update (actually handles it in a meaningful way).
-    for (const int of state.interrupts) {
-        const checkpoint = ReplayEngine.supply(replayState, int, update);
-        const result = await engine.replay(replayState);
-        switch (result.type) {
-            case "returned":
-                // tell caller that we are done, all good
-                return { status: "complete" };
-            case "thrown":
-                // tell caller that an error was thrown, it should leave the
-                // conversation and rethrow the error
-                return { status: "error", error: result.error };
-            case "interrupted":
-                if (result.message === "skip") {
-                    // current interrupt was skipped, replay again with the next
-                    ReplayEngine.reset(replayState, checkpoint);
-                    continue;
-                } else if (result.message === "halt") {
-                    // tell caller that we are done, all good
-                    return { status: "complete" };
-                } else {
-                    // tell caller that we handled the update and updated the state
-                    return {
-                        status: "handled",
-                        replay: result.state,
-                        interrupts: result.interrupts,
-                    };
-                }
-        }
-    }
-    // tell caller that we want to skip the update and did not modify the state
-    return { status: "skipped" };
 }
