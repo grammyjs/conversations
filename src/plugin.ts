@@ -1,3 +1,4 @@
+// TODO: test everything here
 import {
     Api,
     Composer,
@@ -11,10 +12,10 @@ import {
 import { type ReplayControls, ReplayEngine } from "./engine.ts";
 import { type ReplayState } from "./state.ts";
 
-const internal = Symbol("conversations");
+const internalMutableState = Symbol("conversations");
 
 export interface ConversationOptions<C extends Context> {
-    read(ctx: C): ConversationData | Promise<ConversationData>;
+    read(ctx: C): ConversationData | Promise<ConversationData | undefined>;
     write(ctx: C, state: ConversationData): void | Promise<void>;
     delete(ctx: C): void | Promise<void>;
 }
@@ -26,9 +27,12 @@ export function conversations<C extends Context>(
     options: ConversationOptions<C>,
 ): MiddlewareFn<C> {
     return async (ctx, next) => {
+        if (internalMutableState in ctx) {
+            throw new Error("Cannot install conversations plugin twice!");
+        }
         let read = false;
-        const state = await options.read(ctx);
-        Object.defineProperty(ctx, internal, {
+        const state = await options.read(ctx) ?? {};
+        Object.defineProperty(ctx, internalMutableState, {
             get() {
                 read = true;
                 return state; // will be mutated by conversations
@@ -90,16 +94,16 @@ export function createConversation<C extends Context>(
         throw new Error("Cannot register a conversation without a name!");
     }
     return async (ctx, next) => {
-        if (!(internal in ctx)) {
+        if (!(internalMutableState in ctx)) {
             throw new Error(
                 "Cannot register a conversation without installing the conversations plugin first!",
             );
         }
-        const data = ctx[internal] as ConversationData;
+        const mutableData = ctx[internalMutableState] as ConversationData;
         const result = await runParallelConversations(
             builder,
             id,
-            data,
+            mutableData, // will be mutated on ctx
             ctx.update,
             ctx.api,
             ctx.me,
@@ -157,7 +161,13 @@ export async function enterConversation<C extends Context>(
     // deno-lint-ignore no-explicit-any
     ...args: any[]
 ) {
+    // TODO: check if this conversation has already been entered
+    // and only enter another version of it if { parallel: true }
+    // was specified
     const packedArgs = JSON.stringify(args);
+    // TODO: this does not make sense yet.
+    // Why would we init the state with an update
+    // and then also supply the same update for resuming?
     const initialState = ReplayEngine.init(update);
     const state: ConversationState = {
         args: packedArgs,
@@ -165,6 +175,7 @@ export async function enterConversation<C extends Context>(
         interrupts: [],
     };
     return await resumeConversation(conversation, update, api, me, state);
+    // TODO: push state to array at ctx[internal][id]
 }
 
 export async function resumeConversation<C extends Context>(
