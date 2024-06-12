@@ -317,6 +317,13 @@ export class Conversation<C extends Context> {
         } = typeof op === "function" ? { task: op as F } : op;
         // Prepare values before storing them
         async function action() {
+            // TODO: Make sure that no other ops are performed concurrently (or
+            // from within the handler) because they will not be performed
+            // during a replay so they will be missing from the logs then, which
+            // clogs up the replay. This detection must be done here because
+            // this is the only place where misuse can be detected properly. The
+            // replay engine cannot discover that on its own because otherwise
+            // it would not support concurrent ops at all, which is undesired.
             try {
                 const ret = await task(...args);
                 return { ok: true, ret: await beforeStore(ret) } as const;
