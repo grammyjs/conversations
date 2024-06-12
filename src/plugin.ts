@@ -14,8 +14,9 @@ import { type ReplayState } from "./state.ts";
 
 const internalMutableState = Symbol("conversations");
 
+type MaybePromise<T> = T | Promise<T>;
 export interface ConversationOptions<C extends Context> {
-    read(ctx: C): ConversationData | Promise<ConversationData | undefined>;
+    read(ctx: C): MaybePromise<ConversationData | undefined>;
     write(ctx: C, state: ConversationData): void | Promise<void>;
     delete(ctx: C): void | Promise<void>;
 }
