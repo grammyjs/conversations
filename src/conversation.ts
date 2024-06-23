@@ -729,6 +729,7 @@ export class ConversationHandle<C extends Context> {
     private replayIndex: ReplayIndex = { wait: 0 };
     private currentCtx?: C;
     private active = true;
+    private pauseApiLog = false;
     private mw = new Composer<C>();
 
     constructor(
@@ -740,7 +741,9 @@ export class ConversationHandle<C extends Context> {
         // We intercept Bot API calls, returning logged responses while
         // replaying, and logging the responses of performed calls otherwise.
         ctx.api.config.use(async (prev, method, payload, signal) => {
-            if (!this.active) return prev(method, payload, signal);
+            if (!this.active || this.pauseApiLog) {
+                return prev(method, payload, signal);
+            }
             // deno-lint-ignore no-explicit-any
             if (this._isReplaying) return this._replayApi(method) as any;
             const slot = this._logApi(method);
@@ -1202,6 +1205,7 @@ export class ConversationHandle<C extends Context> {
             else throw await afterLoadError(result.e);
         }
         // Otherwise, execute the task and log its result
+        this.pauseApiLog = true;
         const slot = this._logExt();
         try {
             const result = await task(...args);
@@ -1213,6 +1217,7 @@ export class ConversationHandle<C extends Context> {
             slot.r = { e: value };
             throw error;
         } finally {
+            this.pauseApiLog = false;
             this._finalize(slot);
         }
     }
