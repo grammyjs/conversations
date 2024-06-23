@@ -1141,6 +1141,54 @@ describe("The conversation engine", () => {
                 [slashStart, slashStart, slashStart, slashStart],
             );
         });
+        it("which should not log ctx.api calls if called inside external", async () => {
+            const targetMessageId = 12345;
+            const bot = new Bot<MyContext>("dummy", { botInfo });
+            const api = spy((
+                _prev,
+                _method: string,
+                _payload: Record<string, unknown>,
+            ) => Promise.resolve({
+                ok: true as const,
+                result: { message_id: targetMessageId } as any,
+            }));
+            bot.api.config.use(api);
+            async function conv(conversation: MyConversation, ctx: MyContext) {
+                const messageId = await conversation.external(async () => {
+                    const message = await ctx.reply("inside external");
+                    const messageId = message.message_id;
+                    return messageId;
+                });
+                await conversation.wait();
+
+                if (messageId !== targetMessageId) {
+                    throw "never";
+                }
+
+                await conversation.wait();
+                throw "done";
+            }
+            bot.use(
+                session({ initial: () => ({}) }),
+                conversations(),
+                createConversation(conv),
+            );
+            bot.command("start", (ctx) => ctx.conversation.enter("conv"));
+            bot.use((ctx) => ctx.reply("outside"));
+            await bot.handleUpdate(slashStart);
+            assertEquals(api.calls.length, 1);
+            assertEquals(api.calls[0].args[1], "sendMessage");
+            assertEquals(api.calls[0].args[2].text, "inside external");
+            await bot.handleUpdate({
+                update_id: 42,
+                message: { message_id, chat, from, date, text: "msg" },
+            });
+
+            // Because ctx.api logs are not recorded inside external, and nothing inside .external runs again
+            // we should not expect any futher calls to ctx.api; just the serializable value of .external
+            assertEquals(api.calls.length, 1);
+            assertRejects(() => bot.handleUpdate(slashStart), BotError, "done");
+        });
     });
     describe("provides conversation.session", () => {
         it("which should verify it has a current context object", () => {
