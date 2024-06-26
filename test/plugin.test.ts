@@ -5,9 +5,11 @@ import {
     createConversation,
 } from "../src/plugin.ts";
 import {
+    assertEquals,
     assertRejects,
     assertSpyCall,
     assertSpyCalls,
+    assertThrows,
     describe,
     it,
     spy,
@@ -81,5 +83,19 @@ describe("conversations", () => {
         assertSpyCall(read, 0, { args: [ctx], returned: { convo: [] } });
         assertSpyCalls(write, 0);
         assertSpyCalls(del, 0);
+    });
+});
+
+describe("createConversation", () => {
+    it("should make sure that conversations have a name", () => {
+        assertEquals(typeof createConversation(() => {}, "convo"), "function");
+        const convo2 = () => {};
+        assertEquals(typeof createConversation(convo2), "function");
+        assertEquals(
+            typeof createConversation(function convo3() {}),
+            "function",
+        );
+        assertThrows(() => createConversation(function () {}));
+        assertThrows(() => createConversation(() => {}));
     });
 });
