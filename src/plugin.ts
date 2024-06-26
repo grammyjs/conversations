@@ -38,6 +38,7 @@ export function conversations<C extends Context>(
                 read = true;
                 return state; // will be mutated by conversations
             },
+            // no set
         });
         await next();
         if (read) {
@@ -91,7 +92,7 @@ export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
     id: string = builder.name,
 ): MiddlewareFn<C> {
-    if (id === undefined) {
+    if (!id) {
         throw new Error("Cannot register a conversation without a name!");
     }
     return async (ctx, next) => {
