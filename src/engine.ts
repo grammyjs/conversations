@@ -45,12 +45,11 @@ export class ReplayEngine {
         return await replayState(this.builder, state);
     }
 
-    static init(first: unknown) {
+    static open() {
         const state = create();
         const mut = mutate(state);
-        const op = mut.op();
-        mut.done(op, first);
-        return state;
+        const int = mut.op();
+        return [state, int] as const;
     }
     static supply(state: ReplayState, interrupt: number, value: unknown) {
         const get = inspect(state);

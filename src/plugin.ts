@@ -1,4 +1,3 @@
-// TODO: test everything here
 import {
     Api,
     Composer,
@@ -12,7 +11,8 @@ import {
 import { type ReplayControls, ReplayEngine } from "./engine.ts";
 import { type ReplayState } from "./state.ts";
 
-const internalMutableState = Symbol("conversations");
+const internalMutableState = Symbol("conversations.data");
+const internalIndex = Symbol("conversations.builders");
 
 type MaybePromise<T> = T | Promise<T>;
 export interface ConversationOptions<C extends Context> {
@@ -21,24 +21,126 @@ export interface ConversationOptions<C extends Context> {
     delete(ctx: C): void | Promise<void>;
 }
 export interface ConversationData {
-    [id: string]: ConversationState[];
+    [id: string]: [ConversationState, ...ConversationState[]];
+}
+type ConversationIndex<C extends Context> = Map<string, ConversationBuilder<C>>;
+export type ConversationContext<C extends Context> =
+    & C
+    & { conversation: ConversationControls };
+export interface ConversationControls {
+    enter(
+        name: string,
+        options?: { parallel?: boolean; args?: unknown[] },
+    ): Promise<void>;
+    exit(name: string): Promise<void>;
+    exitAll(): Promise<void>;
+    exitOne(name: string, index: number): Promise<void>;
+    active(): Record<string, number>;
+    active(name: string): number;
+}
+function controls(
+    getData: () => ConversationData,
+    // deno-lint-ignore no-explicit-any
+    enter: (name: string, ...args: any[]) => Promise<ConversationResult>,
+): ConversationControls {
+    return {
+        async enter(name, options) {
+            const data = getData();
+            if (data[name] !== undefined && !options?.parallel) {
+                throw new Error("This conversation was already entered");
+            }
+            const result = await enter(name);
+            switch (result.status) {
+                case "complete":
+                    return;
+                case "error":
+                    throw result.error;
+                case "handled": {
+                    const state: ConversationState = {
+                        // TODO: avoid double stringify
+                        args: JSON.stringify(options?.args ?? []),
+                        interrupts: result.interrupts,
+                        replay: result.replay,
+                    };
+                    if (data[name] === undefined) {
+                        data[name] = [state];
+                    } else {
+                        data[name].push(state);
+                    }
+                    return;
+                }
+                case "skipped":
+                    // TODO: push empty state so that we can resume without actually having an update
+                    return;
+                default: {
+                    // exhaustiveness check
+                    const unreachable: never = result;
+                    throw unreachable;
+                }
+            }
+        },
+        // TODO: implement exiting
+        async exit(_name) {},
+        async exitAll() {},
+        async exitOne(_name, _index) {},
+        // deno-lint-ignore no-explicit-any
+        active(name?: string): any {
+            const data = getData();
+            return name === undefined
+                ? Object.fromEntries(
+                    Object.entries(data)
+                        .map(([name, states]) => [name, states.length]),
+                )
+                : data[name].length;
+        },
+    };
 }
 
 export function conversations<C extends Context>(
     options: ConversationOptions<C>,
-): MiddlewareFn<C> {
+): MiddlewareFn<ConversationContext<C>> {
     return async (ctx, next) => {
         if (internalMutableState in ctx) {
             throw new Error("Cannot install conversations plugin twice!");
         }
+
         let read = false;
-        const state = await options.read(ctx) ?? {};
-        Object.defineProperty(ctx, internalMutableState, {
-            get() {
-                read = true;
-                return state; // will be mutated by conversations
-            },
-            // no set
+        const res = await options.read(ctx);
+        if (res === undefined) {
+            await next();
+            return;
+        }
+        const state = res;
+        function getData() {
+            read = true;
+            return state; // will be mutated by conversations
+        }
+
+        const index: ConversationIndex<C> = new Map();
+        // deno-lint-ignore no-explicit-any
+        async function enter(id: string, ...args: any[]) {
+            const builder = index.get(id);
+            if (builder === undefined) {
+                const known = Array.from(index.keys())
+                    .map((id) => `'${id}'`)
+                    .join(", ");
+                throw new Error(
+                    `The conversation '${id}' has not been registered! Known conversations are: ${known}`,
+                );
+            }
+            return await enterConversation(
+                builder,
+                ctx.update,
+                ctx.api,
+                ctx.me,
+                ...args,
+            );
+        }
+
+        Object.defineProperty(ctx, internalMutableState, { get: getData });
+        Object.defineProperty(ctx, internalIndex, { value: index });
+        Object.defineProperty(ctx, "conversation", {
+            value: controls(getData, enter),
         });
         await next();
         if (read) {
@@ -51,29 +153,29 @@ export function conversations<C extends Context>(
     };
 }
 
-export interface ConversationState {
+interface ConversationState {
     args: string;
     replay: ReplayState;
     interrupts: number[];
 }
-export type ConversationResult =
+type ConversationResult =
     | ConversationComplete
     | ConversationError
     | ConversationHandled
     | ConversationSkipped;
-export interface ConversationComplete {
+interface ConversationComplete {
     status: "complete";
 }
-export interface ConversationError {
+interface ConversationError {
     status: "error";
     error: unknown;
 }
-export interface ConversationHandled {
+interface ConversationHandled {
     status: "handled";
     replay: ReplayState;
     interrupts: number[];
 }
-export interface ConversationSkipped {
+interface ConversationSkipped {
     status: "skipped";
 }
 
@@ -83,6 +185,7 @@ export type ConversationBuilder<C extends Context> = (
     // deno-lint-ignore no-explicit-any
     ...args: any[]
 ) => void | Promise<void>;
+// TODO: add wait timeouts
 // export interface ConversationConfig {
 //     id?: string;
 //     maxMillisecondsToWait?: number;
@@ -91,16 +194,23 @@ export type ConversationBuilder<C extends Context> = (
 export function createConversation<C extends Context>(
     builder: ConversationBuilder<C>,
     id: string = builder.name,
-): MiddlewareFn<C> {
+): MiddlewareFn<ConversationContext<C>> {
     if (!id) {
         throw new Error("Cannot register a conversation without a name!");
     }
     return async (ctx, next) => {
-        if (!(internalMutableState in ctx)) {
+        if (!(internalMutableState in ctx) || !(internalIndex in ctx)) {
             throw new Error(
                 "Cannot register a conversation without installing the conversations plugin first!",
             );
         }
+
+        const index = ctx[internalIndex] as ConversationIndex<C>;
+        if (index.has(id)) {
+            throw new Error(`Duplicate conversation identifier '${id}'!`);
+        }
+        index.set(id, builder);
+
         const mutableData = ctx[internalMutableState] as ConversationData;
         const result = await runParallelConversations(
             builder,
@@ -162,22 +272,15 @@ export async function enterConversation<C extends Context>(
     me: UserFromGetMe,
     // deno-lint-ignore no-explicit-any
     ...args: any[]
-) {
-    // TODO: check if this conversation has already been entered
-    // and only enter another version of it if { parallel: true }
-    // was specified
+): Promise<ConversationResult> {
     const packedArgs = JSON.stringify(args);
-    // TODO: this does not make sense yet.
-    // Why would we init the state with an update
-    // and then also supply the same update for resuming?
-    const initialState = ReplayEngine.init(update);
+    const [initialState, int] = ReplayEngine.open();
     const state: ConversationState = {
         args: packedArgs,
         replay: initialState,
-        interrupts: [],
+        interrupts: [int],
     };
     return await resumeConversation(conversation, update, api, me, state);
-    // TODO: push state to array at ctx[internal][id]
 }
 
 export async function resumeConversation<C extends Context>(
