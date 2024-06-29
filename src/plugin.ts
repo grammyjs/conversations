@@ -370,7 +370,7 @@ function hydrateContext<C extends Context>(
                 return ret.res;
             } else {
                 throw new HttpError(
-                    "Recovered error: " + ret.err.message,
+                    "Error inside conversation: " + ret.err.message,
                     new Error(ret.err.error),
                 );
             }
