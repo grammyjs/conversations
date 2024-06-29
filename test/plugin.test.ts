@@ -131,32 +131,70 @@ describe("createConversation", () => {
             "without installing the conversations plugin",
         );
     });
-    it("should store conversation data on the context", async () => {
-        const ctx = new Context(
-            {} as Update,
-            new Api("dummy"),
-            {} as UserFromGetMe,
-        ) as TestContext;
-        const read = spy((): ConversationData => ({}));
-        const write = spy((_ctx: Context, _state: ConversationData) => {});
-        const del = spy(() => {});
-        const mw = new Composer<TestContext>();
-        let i = 0;
-        mw.use(
-            conversations({ read, write, delete: del }),
-            createConversation(async (c) => {
-                i++;
-                await c.wait();
-            }, "convo"),
-            (ctx) => ctx.conversation.enter("convo"),
-        );
-        await mw.middleware()(ctx, next);
-        assertEquals(i, 1);
-        assertSpyCalls(read, 1);
-        assertSpyCall(read, 0, { args: [ctx] });
-        assertSpyCalls(write, 1);
-        assertEquals(write.calls[0].args[0], ctx);
-        assertEquals(write.calls[0].args[1].convo.length, 1);
-        assertSpyCalls(del, 0);
+    describe("should install ctx.conversation which", () => {
+        it("should support entering conversations", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                (ctx) => ctx.conversation.enter("convo"),
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 1);
+            assertSpyCalls(del, 0);
+        });
+        // TODO: enter unknown name
+        // TODO: already entered (no parallel)
+        // TODO: parallel conversations
+        // TODO: enter and complete immediately
+        // TODO: enter and throw immediately
+        // TODO: enter and skip immediately
+        // TODO: enter and wait and resume
+        // TODO: enter and inspect active
+        // TODO: resume and inspect active
+        // TODO: enter parallel inspect all active
+        // TODO: enter without await
+        // TODO: concurrent enter without parallel
+        // TODO: concurrent enter with parallel
+        // TODO: enter and exit
+        // TODO: resume and exit
+        // TODO: exit all
+        // TODO: exit first
+        // TODO: exit last
+        // TODO: install conversations inside conversation
+        // TODO: concurrent enter and exit
     });
+    // TODO: resume without parallel
+    // TODO: resume with parallel
+    // TODO: resume and handle error
+    // TODO: resume and exit
+    // TODO: resume and skip
+    // TODO: resume and halt
+    // TODO: do not touch conversations with a different name
+    // TODO: wait
+    // TODO: skip
+    // TODO: halt
+    // TODO: external with plain data
+    // TODO: external with custom serialsation for values
+    // TODO: external with custom serialsation for errors
+    // TODO: run
+    // TODO: concurrent wait/skip/halt/external/run
+    // TODO: common cases such as loops with side-effects, or floating checks
 });
