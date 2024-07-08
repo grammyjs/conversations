@@ -39,29 +39,18 @@ export function inspect(state: ReplayState) {
 }
 
 export function mutate(state: ReplayState) {
-    function validateOp(op: number) {
-        if (op < 0) throw new Error(`Op ${op} is invalid`);
-        if (op >= state.send.length) throw new Error(`No op ${op} in state`);
-    }
-    function validateDone(done: number) {
-        if (done < 0) throw new Error(`Done ${done} is invalid`);
-        if (done >= state.receive.length) {
-            throw new Error(`No done ${done} in state`);
-        }
-    }
-
     function op(payload?: string) {
         const index = state.send.length;
         state.send.push(payload === undefined ? {} : { payload });
         return index;
     }
     function done(op: number, result: unknown) {
-        validateOp(op);
+        if (op < 0) throw new Error(`Op ${op} is invalid`);
+        if (op >= state.send.length) throw new Error(`No op ${op} in state`);
         state.receive.push({ send: op, returnValue: result });
     }
     function reset([op, done]: Checkpoint) {
-        validateOp(op);
-        validateDone(done);
+        if (op < 0 || done < 0) throw new Error("Invalid checkpoint");
         state.send.splice(op);
         state.receive.splice(done);
     }
