@@ -342,12 +342,154 @@ describe("createConversation", () => {
             assertEquals(write.calls[0].args[1].convo.length, 1);
             assertSpyCalls(del, 0);
         });
-        // TODO: enter and wait and resume
-        // TODO: inspect unknown active conversations
-        // TODO: enter and inspect active
-        // TODO: resume and inspect active
-        // TODO: enter parallel inspect all active
-        // TODO: enter without await
+        it("should support entering and resuming conversations", async () => {
+            let ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            let state: ConversationData = {};
+            const read = spy((_ctx: Context) => state);
+            const write = spy((_ctx: Context, data: ConversationData) => {
+                state = data;
+            });
+            const del = spy((_ctx: Context) => {});
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            let j = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                    j++;
+                }, "convo"),
+                (ctx) => ctx.conversation.enter("convo"),
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertEquals(j, 0);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 1);
+            assertSpyCalls(del, 0);
+            ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 2);
+            assertEquals(j, 1);
+            assertSpyCalls(read, 2);
+            assertSpyCall(read, 1, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertSpyCalls(del, 1);
+            assertSpyCall(del, 0, { args: [ctx] });
+        });
+        it("should allow inspecting unknown active conversations", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            mw.use(
+                conversations({
+                    read: () => ({}),
+                    write: () => {},
+                    delete: () => {},
+                }),
+                (ctx) => {
+                    assertEquals(ctx.conversation.active("nope"), 0);
+                    assertEquals(ctx.conversation.active(), {});
+                    i++;
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+        });
+        it("should support inspecting active conversations", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+            const mw = new Composer<TestContext>();
+            let j = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    await c.wait();
+                }, "convo"),
+                createConversation(async (c) => {
+                    await c.wait();
+                }, "other"),
+                async (ctx) => {
+                    const len = 3;
+                    for (let i = 0; i < len; i++) {
+                        await ctx.conversation.enter("convo", {
+                            parallel: true,
+                        });
+                        assertEquals(ctx.conversation.active("convo"), i + 1);
+                        assertEquals(ctx.conversation.active(), {
+                            convo: i + 1,
+                        });
+                    }
+                    await ctx.conversation.enter("other");
+
+                    assertEquals(ctx.conversation.active("convo"), len);
+                    assertEquals(ctx.conversation.active("other"), 1);
+                    assertEquals(ctx.conversation.active(), {
+                        convo: len,
+                        other: 1,
+                    });
+                    j++;
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(j, 1);
+        });
+        it("should throw when entering conversations without await", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const mw = new Composer<TestContext>();
+
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+
+            let i = 0;
+            let p: Promise<unknown> | undefined;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                (ctx) => {
+                    p = assertRejects(() => ctx.conversation.enter("convo"))
+                        .then(() => i++);
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            await p;
+            assertEquals(i, 2);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 0);
+            assertSpyCalls(del, 1); // will read but not end up with data -> expect deletion
+        });
         // TODO: concurrent enter without parallel
         // TODO: concurrent enter with parallel
         // TODO: enter and exit
