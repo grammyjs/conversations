@@ -75,11 +75,6 @@ function controls(
                         replay: result.initialState,
                     }];
                     return;
-                default: {
-                    // exhaustiveness check
-                    const unreachable: never = result;
-                    throw unreachable;
-                }
             }
         },
         // TODO: implement exiting
