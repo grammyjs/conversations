@@ -76,6 +76,28 @@ describe("mutate and inspect", () => {
         assertEquals(get.payload(op3), "three");
         assertEquals(get.doneCount(), 2);
     });
+    it("considers the most recent checkpoint as a no-op", () => {
+        const state = create();
+        const get = inspect(state);
+        const mut = mutate(state);
+
+        mut.op("op");
+
+        const ops = get.opCount();
+        const dones = get.doneCount();
+
+        const checkpoint = get.checkpoint();
+        mut.reset(checkpoint);
+
+        assertEquals(get.opCount(), ops);
+        assertEquals(get.doneCount(), dones);
+    });
+    it("detects bad checkpoints", () => {
+        const state = create();
+        const mut = mutate(state);
+        assertThrows(() => mut.reset([-1, 5]), Error, "Invalid checkpoint");
+        assertThrows(() => mut.reset([1, -5]), Error, "Invalid checkpoint");
+    });
 });
 
 describe("cursor", () => {
