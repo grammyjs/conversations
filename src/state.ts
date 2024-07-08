@@ -29,7 +29,7 @@ export function inspect(state: ReplayState) {
     }
     function payload(op: number) {
         if (op < 0) throw new Error(`Op ${op} is invalid`);
-        if (op > state.send.length) throw new Error(`No op ${op} in state`);
+        if (op >= state.send.length) throw new Error(`No op ${op} in state`);
         return state.send[op].payload;
     }
     function checkpoint(): Checkpoint {
