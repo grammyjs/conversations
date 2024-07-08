@@ -41,7 +41,7 @@ export interface ConversationControls {
 function controls(
     getData: () => ConversationData,
     // deno-lint-ignore no-explicit-any
-    enter: (name: string, ...args: any[]) => Promise<ConversationResult>,
+    enter: (name: string, ...args: any[]) => Promise<EnterResult>,
 ): ConversationControls {
     return {
         async enter(name, options) {
@@ -49,7 +49,7 @@ function controls(
             if (data[name] !== undefined && !options?.parallel) {
                 throw new Error("This conversation was already entered");
             }
-            const result = await enter(name);
+            const result = await enter(name, ...options?.args ?? []);
             switch (result.status) {
                 case "complete":
                     return;
@@ -57,8 +57,7 @@ function controls(
                     throw result.error;
                 case "handled": {
                     const state: ConversationState = {
-                        // TODO: avoid double stringify
-                        args: JSON.stringify(options?.args ?? []),
+                        args: result.args,
                         interrupts: result.interrupts,
                         replay: result.replay,
                     };
@@ -70,7 +69,11 @@ function controls(
                     return;
                 }
                 case "skipped":
-                    // TODO: push empty state so that we can resume without actually having an update
+                    data[name] = [{
+                        args: result.args,
+                        interrupts: result.initialInterrupts,
+                        replay: result.initialState,
+                    }];
                     return;
                 default: {
                     // exhaustiveness check
@@ -265,6 +268,22 @@ export async function runParallelConversations<C extends Context>(
     return { status: "skipped" };
 }
 
+export type EnterResult =
+    | EnterComplete
+    | EnterError
+    | EnterHandled
+    | EnterSkipped;
+export type EnterComplete = ConversationComplete;
+export type EnterError = ConversationError;
+export interface EnterHandled extends ConversationHandled {
+    args: string;
+}
+export interface EnterSkipped extends ConversationSkipped {
+    args: string;
+    initialState: ReplayState;
+    initialInterrupts: number[];
+}
+
 export async function enterConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
     update: Update,
@@ -272,7 +291,7 @@ export async function enterConversation<C extends Context>(
     me: UserFromGetMe,
     // deno-lint-ignore no-explicit-any
     ...args: any[]
-): Promise<ConversationResult> {
+): Promise<EnterResult> {
     const packedArgs = JSON.stringify(args);
     const [initialState, int] = ReplayEngine.open();
     const state: ConversationState = {
@@ -280,7 +299,27 @@ export async function enterConversation<C extends Context>(
         replay: initialState,
         interrupts: [int],
     };
-    return await resumeConversation(conversation, update, api, me, state);
+    const result = await resumeConversation(
+        conversation,
+        update,
+        api,
+        me,
+        state,
+    );
+    switch (result.status) {
+        case "complete":
+        case "error":
+            return result;
+        case "handled":
+            return { args: packedArgs, ...result };
+        case "skipped":
+            return {
+                args: packedArgs,
+                initialState,
+                initialInterrupts: state.interrupts,
+                ...result,
+            };
+    }
 }
 
 export async function resumeConversation<C extends Context>(
