@@ -13,6 +13,7 @@ import { type ReplayState } from "./state.ts";
 
 const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
+const internalCompletenessMarker = Symbol("conversations.completeness");
 
 type MaybePromise<T> = T | Promise<T>;
 export interface ConversationOptions<C extends Context> {
@@ -42,6 +43,7 @@ function controls(
     getData: () => ConversationData,
     // deno-lint-ignore no-explicit-any
     enter: (name: string, ...args: any[]) => Promise<EnterResult>,
+    canSave: () => boolean,
 ): ConversationControls {
     return {
         async enter(name, options) {
@@ -50,6 +52,13 @@ function controls(
                 throw new Error("This conversation was already entered");
             }
             const result = await enter(name, ...options?.args ?? []);
+            if (!canSave()) {
+                throw new Error(
+                    "The middleware has completed before conversation was fully \
+entered so the conversations plugin cannot persist data anymore, did you forgot \
+to use `await`?",
+                );
+            }
             switch (result.status) {
                 case "complete":
                     return;
@@ -135,12 +144,17 @@ export function conversations<C extends Context>(
             );
         }
 
+        function canSave() {
+            return !(internalCompletenessMarker in ctx);
+        }
+
         Object.defineProperty(ctx, internalMutableState, { get: getData });
         Object.defineProperty(ctx, internalIndex, { value: index });
         Object.defineProperty(ctx, "conversation", {
-            value: controls(getData, enter),
+            value: controls(getData, enter, canSave),
         });
         await next();
+        Object.defineProperty(ctx, internalCompletenessMarker, { value: true });
         if (read) {
             if (Object.keys(state).length === 0) {
                 await options.delete(ctx);
