@@ -91,7 +91,7 @@ function controls(
                     Object.entries(data)
                         .map(([name, states]) => [name, states.length]),
                 )
-                : data[name].length;
+                : data[name]?.length ?? 0;
         },
     };
 }
