@@ -35,23 +35,25 @@ describe("mutate and inspect", () => {
         const state = create();
         const get = inspect(state);
         assertThrows(() => get.payload(-1));
-        assertThrows(() => get.payload(3));
+        assertThrows(() => get.payload(0));
+        assertThrows(() => get.payload(1));
         const mut = mutate(state);
         const op = mut.op("begin");
         assertEquals(get.payload(op), "begin");
-        assertThrows(() => get.payload(-1));
-        assertThrows(() => get.payload(3));
+        assertThrows(() => get.payload(-1), Error, "Op -1 is invalid");
+        assertEquals(get.payload(op), "begin");
+        assertThrows(() => get.payload(1), Error, "No op 1 in state");
     });
     it("validate done calls", () => {
         const state = create();
         const mut = mutate(state);
         assertThrows(() => mut.done(-1, "result"));
         assertThrows(() => mut.done(0, "result"));
-        assertThrows(() => mut.done(3, "result"));
+        assertThrows(() => mut.done(1, "result"));
         const op0 = mut.op();
-        assertThrows(() => mut.done(-1, "result"));
-        assertThrows(() => mut.done(3, "result"));
+        assertThrows(() => mut.done(-1, "result"), Error, "Op -1 is invalid");
         mut.done(op0, "result");
+        assertThrows(() => mut.done(1, "result"), Error, "No op 1 in state");
     });
     it("can undo mutations based on checkpoints", () => {
         const state = create();
