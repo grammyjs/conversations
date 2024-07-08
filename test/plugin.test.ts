@@ -343,6 +343,7 @@ describe("createConversation", () => {
             assertSpyCalls(del, 0);
         });
         // TODO: enter and wait and resume
+        // TODO: inspect unknown active conversations
         // TODO: enter and inspect active
         // TODO: resume and inspect active
         // TODO: enter parallel inspect all active
