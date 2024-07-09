@@ -605,11 +605,68 @@ describe("createConversation", () => {
             assertEquals(write.calls[0].args[1].convo.length, 2); // only stored first one
             assertSpyCalls(del, 0);
         });
+        it("should support entering and exiting all conversations", async () => {
+            let ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            let state: ConversationData = {};
+            const read = spy((_ctx: Context) => state);
+            const write = spy((_ctx: Context, data: ConversationData) => {
+                state = data;
+            });
+            const del = spy((_ctx: Context) => {});
+            let mw = new Composer<TestContext>();
+            let i = 0;
+            let j = 0;
+            const plugin = conversations({ read, write, delete: del });
+            mw.use(
+                plugin,
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                createConversation(async (c) => {
+                    j++;
+                    await c.wait();
+                }, "other"),
+                async (ctx) => {
+                    await ctx.conversation.enter("convo");
+                    await ctx.conversation.enter("other");
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertEquals(j, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 1);
+            assertEquals(write.calls[0].args[1].other.length, 1);
+            assertSpyCalls(del, 0);
+
+            ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            mw = new Composer<TestContext>();
+            mw.use(plugin, (ctx) => ctx.conversation.exitAll());
+            await mw.middleware()(ctx, next);
+            assertSpyCalls(read, 2);
+            assertSpyCall(read, 1, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertSpyCalls(del, 1);
+            assertSpyCall(del, 0, { args: [ctx] });
+        });
         // TODO: enter and exit
         // TODO: resume and exit
-        // TODO: exit all
         // TODO: exit first
         // TODO: exit last
+        // TODO: enter handlers
+        // TODO: exit handlers
         // TODO: install conversations inside conversation
         // TODO: concurrent enter and exit
     });
