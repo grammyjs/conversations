@@ -19,6 +19,8 @@ export interface ConversationOptions<C extends Context> {
     read(ctx: C): MaybePromise<ConversationData | undefined>;
     write(ctx: C, state: ConversationData): void | Promise<void>;
     delete(ctx: C): void | Promise<void>;
+    onEnter?(id: string): unknown | Promise<unknown>;
+    onExit?(id: string): unknown | Promise<unknown>;
 }
 export interface ConversationData {
     [id: string]: ConversationState[];
@@ -42,6 +44,7 @@ function controls(
     getData: () => ConversationData,
     // deno-lint-ignore no-explicit-any
     enter: (name: string, ...args: any[]) => Promise<EnterResult>,
+    exit: (name: string) => Promise<void>,
     canSave: () => boolean,
 ): ConversationControls {
     return {
@@ -77,15 +80,43 @@ to use `await`?",
                         interrupts: result.interrupts,
                         replay: result.replay,
                     };
-                    data[name].push(state);
+                    data[name]?.push(state);
                     return;
                 }
             }
         },
-        // TODO: implement exiting
-        async exit(_name) {},
-        async exitAll() {},
-        async exitOne(_name, _index) {},
+        async exitAll() {
+            const data = getData();
+            const keys = Object.keys(data);
+            const len = keys.length;
+            let count = 0;
+            for (let i = 0; i < len; i++) {
+                const key = keys[i];
+                count += data[key].length;
+                delete data[key];
+            }
+            for (let i = 0; i < len; i++) {
+                await exit(name);
+            }
+        },
+        async exit(name) {
+            const data = getData();
+            if (data[name] === undefined) return;
+            const len = data[name].length;
+            delete data[name];
+            for (let i = 0; i < len; i++) {
+                await exit(name);
+            }
+        },
+        async exitOne(name, index) {
+            const data = getData();
+            if (
+                data[name] === undefined ||
+                index < 0 || data[name].length <= index
+            ) return;
+            data[name].splice(index, 1);
+            await exit(name);
+        },
         // deno-lint-ignore no-explicit-any
         active(name?: string): any {
             const data = getData();
@@ -132,6 +163,7 @@ export function conversations<C extends Context>(
                     `The conversation '${id}' has not been registered! Known conversations are: ${known}`,
                 );
             }
+            await options.onEnter?.(id);
             return await enterConversation(
                 builder,
                 ctx.update,
@@ -139,6 +171,9 @@ export function conversations<C extends Context>(
                 ctx.me,
                 ...args,
             );
+        }
+        async function exit(id: string) {
+            await options.onExit?.(id);
         }
 
         function canSave() {
@@ -148,7 +183,7 @@ export function conversations<C extends Context>(
         Object.defineProperty(ctx, internalMutableState, { get: getData });
         Object.defineProperty(ctx, internalIndex, { value: index });
         Object.defineProperty(ctx, "conversation", {
-            value: controls(getData, enter, canSave),
+            value: controls(getData, enter, exit, canSave),
         });
         await next();
         Object.defineProperty(ctx, internalCompletenessMarker, { value: true });
