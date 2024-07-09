@@ -22,12 +22,12 @@ export interface ConversationOptions<C extends Context> {
     delete(ctx: C): void | Promise<void>;
 }
 export interface ConversationData {
-    [id: string]: [ConversationState, ...ConversationState[]];
+    [id: string]: ConversationState[];
 }
 type ConversationIndex<C extends Context> = Map<string, ConversationBuilder<C>>;
-export type ConversationContext<C extends Context> =
-    & C
-    & { conversation: ConversationControls };
+export type ConversationContext<C extends Context> = C & {
+    conversation: ConversationControls;
+};
 export interface ConversationControls {
     enter(
         name: string,
@@ -47,15 +47,22 @@ function controls(
 ): ConversationControls {
     return {
         async enter(name, options) {
+            if (!canSave()) {
+                throw new Error(
+                    "The middleware has already completed so it is no longer possible to enter a conversation",
+                );
+            }
             const data = getData();
-            if (data[name] !== undefined && !options?.parallel) {
+            if (data[name] === undefined) {
+                data[name] = [];
+            } else if (!options?.parallel) {
                 throw new Error("This conversation was already entered");
             }
             const result = await enter(name, ...options?.args ?? []);
             if (!canSave()) {
                 throw new Error(
                     "The middleware has completed before conversation was fully \
-entered so the conversations plugin cannot persist data anymore, did you forgot \
+entered so the conversations plugin cannot persist data anymore, did you forget \
 to use `await`?",
                 );
             }
@@ -64,26 +71,16 @@ to use `await`?",
                     return;
                 case "error":
                     throw result.error;
-                case "handled": {
+                case "handled":
+                case "skipped": {
                     const state: ConversationState = {
                         args: result.args,
                         interrupts: result.interrupts,
                         replay: result.replay,
                     };
-                    if (data[name] === undefined) {
-                        data[name] = [state];
-                    } else {
-                        data[name].push(state);
-                    }
+                    data[name].push(state);
                     return;
                 }
-                case "skipped":
-                    data[name] = [{
-                        args: result.args,
-                        interrupts: result.initialInterrupts,
-                        replay: result.initialState,
-                    }];
-                    return;
             }
         },
         // TODO: implement exiting
@@ -118,6 +115,7 @@ export function conversations<C extends Context>(
             return;
         }
         const state = res;
+        const empty = Object.keys(state).length === 0;
         function getData() {
             read = true;
             return state; // will be mutated by conversations
@@ -156,10 +154,27 @@ export function conversations<C extends Context>(
         await next();
         Object.defineProperty(ctx, internalCompletenessMarker, { value: true });
         if (read) {
-            if (Object.keys(state).length === 0) {
-                await options.delete(ctx);
-            } else {
+            // In case of bad usage of async/await, it is possible that `next`
+            // resolves while an enter call is still running. It then may not
+            // have cleaned up its data, leaving behind empty arrays on the
+            // state. Instead of delegating the cleanup responsibility to enter
+            // calls which are unable to do this reliably, we purge empty arrays
+            // ourselves before persisting the state. That way, we don't store
+            // useless data even when bot developers mess up.
+            const keys = Object.keys(state);
+            const len = keys.length;
+            let del = 0;
+            for (let i = 0; i < len; i++) {
+                const key = keys[i];
+                if (state[key].length === 0) {
+                    delete state[key];
+                    del++;
+                }
+            }
+            if (len !== del) { // len - del > 0
                 await options.write(ctx, state);
+            } else if (!empty) {
+                await options.delete(ctx);
             }
         }
     };
@@ -289,8 +304,8 @@ export interface EnterHandled extends ConversationHandled {
 }
 export interface EnterSkipped extends ConversationSkipped {
     args: string;
-    initialState: ReplayState;
-    initialInterrupts: number[];
+    replay: ReplayState;
+    interrupts: number[];
 }
 
 export async function enterConversation<C extends Context>(
@@ -324,8 +339,8 @@ export async function enterConversation<C extends Context>(
         case "skipped":
             return {
                 args: packedArgs,
-                initialState,
-                initialInterrupts: state.interrupts,
+                replay: initialState,
+                interrupts: state.interrupts,
                 ...result,
             };
     }
