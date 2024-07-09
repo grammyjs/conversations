@@ -14,6 +14,7 @@ import {
 import { resolver } from "../src/resolve.ts";
 import {
     assertEquals,
+    assertInstanceOf,
     assertRejects,
     assertSpyCall,
     assertSpyCalls,
@@ -146,11 +147,18 @@ describe("createConversation", () => {
             let i = 0;
             mw.use(
                 conversations({ read, write, delete: del }),
-                createConversation(async (c) => {
+                createConversation(async (c, ctx, arg0, arg1, arg2) => {
+                    assertInstanceOf(ctx, Context);
+                    assertEquals(arg0, -1);
+                    assertEquals(arg1, "str");
+                    assertEquals(arg2, { prop: [] });
                     i++;
                     await c.wait();
                 }, "convo"),
-                (ctx) => ctx.conversation.enter("convo"),
+                (ctx) =>
+                    ctx.conversation.enter("convo", {
+                        args: [-1, "str", { prop: [] }],
+                    }),
             );
             await mw.middleware()(ctx, next);
             assertEquals(i, 1);
@@ -605,6 +613,84 @@ describe("createConversation", () => {
             assertEquals(write.calls[0].args[1].convo.length, 2); // only stored first one
             assertSpyCalls(del, 0);
         });
+        it("should support entering and immediately exiting conversations", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            let state: ConversationData = {};
+            const read = spy((_ctx: Context) => state);
+            const write = spy((_ctx: Context, data: ConversationData) => {
+                state = data;
+            });
+            const del = spy((_ctx: Context) => {});
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                async (ctx) => {
+                    await ctx.conversation.enter("convo");
+                    await ctx.conversation.exit("convo");
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 0);
+            assertSpyCalls(del, 0);
+        });
+        it("should support resuming and exiting a conversation", async () => {
+            let ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            let state: ConversationData = {};
+            const read = spy((_ctx: Context) => state);
+            const write = spy((_ctx: Context, data: ConversationData) => {
+                state = data;
+            });
+            const del = spy((_ctx: Context) => {});
+            let mw = new Composer<TestContext>();
+            let i = 0;
+            const plugin = conversations({ read, write, delete: del });
+            mw.use(
+                plugin,
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                (ctx) => ctx.conversation.enter("convo"),
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 1);
+            assertSpyCalls(del, 0);
+
+            ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            mw = new Composer<TestContext>();
+            mw.use(plugin, (ctx) => ctx.conversation.exit("convo"));
+            await mw.middleware()(ctx, next);
+            assertSpyCalls(read, 2);
+            assertSpyCall(read, 1, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertSpyCalls(del, 1);
+            assertSpyCall(del, 0, { args: [ctx] });
+        });
         it("should support entering and exiting all conversations", async () => {
             let ctx = new Context(
                 {} as Update,
@@ -633,17 +719,18 @@ describe("createConversation", () => {
                 }, "other"),
                 async (ctx) => {
                     await ctx.conversation.enter("convo");
+                    await ctx.conversation.enter("convo", { parallel: true });
                     await ctx.conversation.enter("other");
                 },
             );
             await mw.middleware()(ctx, next);
-            assertEquals(i, 1);
+            assertEquals(i, 2);
             assertEquals(j, 1);
             assertSpyCalls(read, 1);
             assertSpyCall(read, 0, { args: [ctx] });
             assertSpyCalls(write, 1);
             assertEquals(write.calls[0].args[0], ctx);
-            assertEquals(write.calls[0].args[1].convo.length, 1);
+            assertEquals(write.calls[0].args[1].convo.length, 2);
             assertEquals(write.calls[0].args[1].other.length, 1);
             assertSpyCalls(del, 0);
 
@@ -661,13 +748,140 @@ describe("createConversation", () => {
             assertSpyCalls(del, 1);
             assertSpyCall(del, 0, { args: [ctx] });
         });
-        // TODO: enter and exit
-        // TODO: resume and exit
-        // TODO: exit first
-        // TODO: exit last
-        // TODO: enter handlers
-        // TODO: exit handlers
-        // TODO: install conversations inside conversation
+        const targets = ["first", "second", "last"];
+        for (let targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+            it("should support entering and exiting one of many parallel conversations", async () => {
+                let ctx = new Context(
+                    {} as Update,
+                    new Api("dummy"),
+                    {} as UserFromGetMe,
+                ) as TestContext;
+                let state: ConversationData = {};
+                const read = spy((_ctx: Context) => state);
+                const write = spy((_ctx: Context, data: ConversationData) => {
+                    state = data;
+                });
+                const del = spy((_ctx: Context) => {});
+                const onEnter = spy(() => {});
+                const onExit = spy(() => {});
+                let mw = new Composer<TestContext>();
+                let i = 0;
+                const res: string[] = [];
+                const plugin = conversations({
+                    read,
+                    write,
+                    delete: del,
+                    onEnter,
+                    onExit,
+                });
+                const convo = createConversation(async (c, _, id: string) => {
+                    i++;
+                    await c.wait();
+                    res.push(id);
+                }, "convo");
+                mw.use(
+                    plugin,
+                    convo,
+                    async (ctx) => {
+                        for (const target of targets) {
+                            await ctx.conversation.enter("convo", {
+                                args: [target],
+                                parallel: true,
+                            });
+                        }
+                    },
+                );
+                await mw.middleware()(ctx, next);
+                assertEquals(i, 3);
+                assertSpyCalls(read, 1);
+                assertSpyCall(read, 0, { args: [ctx] });
+                assertSpyCalls(write, 1);
+                assertEquals(write.calls[0].args[0], ctx);
+                assertEquals(write.calls[0].args[1].convo.length, 3);
+                assertSpyCalls(del, 0);
+
+                ctx = new Context(
+                    {} as Update,
+                    new Api("dummy"),
+                    {} as UserFromGetMe,
+                ) as TestContext;
+                mw = new Composer<TestContext>(
+                    plugin,
+                    (ctx) => ctx.conversation.exitOne("convo", targetIndex),
+                );
+                await mw.middleware()(ctx, next);
+                assertEquals(i, 3);
+                assertSpyCalls(read, 2);
+                assertSpyCall(read, 1, { args: [ctx] });
+                assertSpyCalls(write, 2);
+                assertEquals(write.calls[1].args[0], ctx);
+                assertEquals(write.calls[1].args[1].convo.length, 2);
+                assertSpyCalls(del, 0);
+
+                ctx = new Context(
+                    {} as Update,
+                    new Api("dummy"),
+                    {} as UserFromGetMe,
+                ) as TestContext;
+                mw = new Composer<TestContext>(plugin, convo);
+                await mw.middleware()(ctx, next);
+
+                ctx = new Context(
+                    {} as Update,
+                    new Api("dummy"),
+                    {} as UserFromGetMe,
+                ) as TestContext;
+                mw = new Composer<TestContext>(plugin, convo);
+                await mw.middleware()(ctx, next);
+
+                assertEquals(
+                    res,
+                    targets.filter((x) => x !== targets[targetIndex]),
+                );
+                assertSpyCalls(onEnter, 3);
+                assertSpyCall(onEnter, 0, { args: ["convo"] });
+                assertSpyCall(onEnter, 1, { args: ["convo"] });
+                assertSpyCall(onEnter, 2, { args: ["convo"] });
+                assertSpyCalls(onExit, 1);
+                assertSpyCall(onExit, 0, { args: ["convo"] });
+            });
+        }
+        it("should prevent installing the conversations plugin recursively", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(
+                    async (_c, ctx: ConversationContext<Context>) => {
+                        await assertRejects(async () => {
+                            const recursive = conversations({
+                                read: () => ({}),
+                                write: () => {},
+                                delete: () => {},
+                            });
+                            await recursive(ctx, () => Promise.resolve());
+                        });
+                        i++;
+                    },
+                    "convo",
+                ),
+                (ctx) => ctx.conversation.enter("convo"),
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 0);
+            assertSpyCalls(del, 0);
+        });
         // TODO: concurrent enter and exit
     });
     // TODO: resume without parallel
@@ -677,13 +891,4 @@ describe("createConversation", () => {
     // TODO: resume and skip
     // TODO: resume and halt
     // TODO: do not touch conversations with a different name
-    // TODO: wait
-    // TODO: skip
-    // TODO: halt
-    // TODO: external with plain data
-    // TODO: external with custom serialsation for values
-    // TODO: external with custom serialsation for errors
-    // TODO: run
-    // TODO: concurrent wait/skip/halt/external/run
-    // TODO: common cases such as loops with side-effects, or floating checks
 });
