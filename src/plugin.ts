@@ -10,6 +10,7 @@ import {
 import { type ReplayControls, ReplayEngine } from "./engine.ts";
 import { type ReplayState } from "./state.ts";
 
+const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
 const internalCompletenessMarker = Symbol("conversations.completeness");
@@ -134,6 +135,11 @@ export function conversations<C extends Context>(
     options: ConversationOptions<C>,
 ): MiddlewareFn<ConversationContext<C>> {
     return async (ctx, next) => {
+        if (internalRecursionDetection in ctx) {
+            throw new Error(
+                "Cannot install the conversations plugin on context objects created by the conversations plugin!",
+            );
+        }
         if (internalMutableState in ctx) {
             throw new Error("Cannot install conversations plugin twice!");
         }
@@ -473,6 +479,7 @@ function hydrateContext<C extends Context>(
             }
         });
         const ctx = new Context(update, api, me) as C;
+        Object.defineProperty(ctx, internalRecursionDetection, { value: true });
         return ctx;
     };
 }
