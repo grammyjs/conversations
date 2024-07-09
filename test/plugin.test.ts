@@ -6,11 +6,12 @@ import {
     type UserFromGetMe,
 } from "../src/deps.deno.ts";
 import {
-    ConversationContext,
+    type ConversationContext,
     type ConversationData,
     conversations,
     createConversation,
 } from "../src/plugin.ts";
+import { resolver } from "../src/resolve.ts";
 import {
     assertEquals,
     assertRejects,
@@ -38,9 +39,11 @@ describe("conversations", () => {
         }));
         const write = spy(() => {});
         const del = spy(() => {});
-        const plugin = conversations({ read, write, delete: del });
         const mw = new Composer<TestContext>();
-        mw.use(plugin, createConversation(() => {}, "convo"));
+        mw.use(
+            conversations({ read, write, delete: del }),
+            createConversation(() => {}, "convo"),
+        );
         await mw.middleware()(ctx, next);
         assertSpyCalls(read, 1);
         assertSpyCall(read, 0, {
@@ -71,12 +74,14 @@ describe("conversations", () => {
     });
     it("delete empty data", async () => {
         const ctx = {} as TestContext;
-        const read = spy((): ConversationData => ({}));
+        const read = spy((): ConversationData => ({ convo: [] }));
         const write = spy(() => {});
         const del = spy(() => {});
-        const plugin = conversations({ read, write, delete: del });
         const mw = new Composer<TestContext>();
-        mw.use(plugin, createConversation(() => {}, "convo"));
+        mw.use(
+            conversations({ read, write, delete: del }),
+            createConversation(() => {}, "convo"),
+        );
         await mw.middleware()(ctx, next);
         assertSpyCalls(read, 1);
         assertSpyCall(read, 0, { args: [ctx], returned: {} });
@@ -275,8 +280,7 @@ describe("createConversation", () => {
             assertSpyCalls(read, 1);
             assertSpyCall(read, 0, { args: [ctx] });
             assertSpyCalls(write, 0);
-            assertSpyCalls(del, 1);
-            assertSpyCall(del, 0, { args: [ctx] });
+            assertSpyCalls(del, 0);
         });
         it("should support conversations that throw immediately after being entered", async () => {
             const ctx = new Context(
@@ -307,8 +311,7 @@ describe("createConversation", () => {
             assertSpyCalls(read, 1);
             assertSpyCall(read, 0, { args: [ctx] });
             assertSpyCalls(write, 0);
-            assertSpyCalls(del, 1);
-            assertSpyCall(del, 0, { args: [ctx] });
+            assertSpyCalls(del, 0);
         });
         it("should support conversations that skip immediately after being entered", async () => {
             const ctx = new Context(
@@ -456,6 +459,44 @@ describe("createConversation", () => {
             await mw.middleware()(ctx, next);
             assertEquals(j, 1);
         });
+        it("should throw when entering conversations after middleware is done", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const mw = new Composer<TestContext>();
+
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+
+            let i = 0;
+            const outer = resolver();
+            let p: Promise<unknown>;
+
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                (ctx) => {
+                    p = outer.promise.then(() =>
+                        ctx.conversation.enter("convo")
+                    );
+                },
+            );
+            await mw.middleware()(ctx, next);
+            outer.resolve();
+            await assertRejects(() => p);
+
+            assertEquals(i, 0);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 0);
+            assertSpyCalls(del, 0);
+        });
         it("should throw when entering conversations without await", async () => {
             const ctx = new Context(
                 {} as Update,
@@ -488,10 +529,82 @@ describe("createConversation", () => {
             assertSpyCalls(read, 1);
             assertSpyCall(read, 0, { args: [ctx] });
             assertSpyCalls(write, 0);
-            assertSpyCalls(del, 1); // will read but not end up with data -> expect deletion
+            assertSpyCalls(del, 0);
         });
-        // TODO: concurrent enter without parallel
-        // TODO: concurrent enter with parallel
+        it("should detect if the same conversation is entered twice concurrently", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const mw = new Composer<TestContext>();
+
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+
+            let i = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                async (ctx) => {
+                    const [c0, c1] = await Promise.allSettled([
+                        ctx.conversation.enter("convo"),
+                        ctx.conversation.enter("convo"),
+                    ]);
+                    assertEquals(c0.status, "fulfilled");
+                    assertEquals(c1.status, "rejected");
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 1); // only stored first one
+            assertSpyCalls(del, 0);
+        });
+        it("should support entering concurrently with parallel", async () => {
+            const ctx = new Context(
+                {} as Update,
+                new Api("dummy"),
+                {} as UserFromGetMe,
+            ) as TestContext;
+            const mw = new Composer<TestContext>();
+
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+
+            let i = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                async (ctx) => {
+                    const [c0, c1] = await Promise.allSettled([
+                        ctx.conversation.enter("convo"),
+                        ctx.conversation.enter("convo", { parallel: true }),
+                    ]);
+                    assertEquals(c0.status, "fulfilled");
+                    assertEquals(c1.status, "fulfilled");
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 2);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 2); // only stored first one
+            assertSpyCalls(del, 0);
+        });
         // TODO: enter and exit
         // TODO: resume and exit
         // TODO: exit all
