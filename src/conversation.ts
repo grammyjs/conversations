@@ -69,8 +69,5 @@ export class Conversation<C extends Context> {
             throw await afterLoadError(ret.err);
         }
     }
-    async run(..._middleware: Middleware<C>[]) {
-        // TODO: implement
-    }
     // TODO: add more methods
 }
