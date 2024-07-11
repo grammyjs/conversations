@@ -196,7 +196,7 @@ describe("createConversation", () => {
             assertSpyCalls(write, 0);
             assertSpyCalls(del, 0);
         });
-        it("should throw an error if a conversation was already entered", async () => {
+        it("should throw an error if the same conversation was already entered", async () => {
             const ctx = mkctx();
             const read = spy((): ConversationData => ({}));
             const write = spy((_ctx: Context, _state: ConversationData) => {});
@@ -226,7 +226,44 @@ describe("createConversation", () => {
             assertEquals(write.calls[0].args[1].convo.length, 1); // one active
             assertSpyCalls(del, 0);
         });
-        it("should support entering parallel conversations", async () => {
+        it("should throw an error if a different conversation was already entered", async () => {
+            const ctx = mkctx();
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            let j = 0;
+            let k = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                createConversation(async (c) => {
+                    j++;
+                    await c.wait();
+                }, "other"),
+                async (ctx) => {
+                    await ctx.conversation.enter("convo");
+                    await assertRejects(() => ctx.conversation.enter("other"));
+                    k++;
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertEquals(j, 0);
+            assertEquals(k, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(Object.keys(write.calls[0].args[1]), ["convo"]);
+            assertEquals(write.calls[0].args[1].convo.length, 1); // one active
+            assertSpyCalls(del, 0);
+        });
+        it("should support entering parallel conversations for the same conversation", async () => {
             const ctx = mkctx();
             const read = spy((): ConversationData => ({}));
             const write = spy((_ctx: Context, _state: ConversationData) => {});
@@ -251,6 +288,40 @@ describe("createConversation", () => {
             assertSpyCalls(write, 1);
             assertEquals(write.calls[0].args[0], ctx);
             assertEquals(write.calls[0].args[1].convo.length, 2); // two active
+            assertSpyCalls(del, 0);
+        });
+        it("should support entering parallel conversations for other conversations", async () => {
+            const ctx = mkctx();
+            const read = spy((): ConversationData => ({}));
+            const write = spy((_ctx: Context, _state: ConversationData) => {});
+            const del = spy(() => {});
+            const mw = new Composer<TestContext>();
+            let i = 0;
+            let j = 0;
+            mw.use(
+                conversations({ read, write, delete: del }),
+                createConversation(async (c) => {
+                    i++;
+                    await c.wait();
+                }, "convo"),
+                createConversation(async (c) => {
+                    j++;
+                    await c.wait();
+                }, "other"),
+                async (ctx) => {
+                    await ctx.conversation.enter("convo");
+                    await ctx.conversation.enter("other", { parallel: true });
+                },
+            );
+            await mw.middleware()(ctx, next);
+            assertEquals(i, 1);
+            assertEquals(j, 1);
+            assertSpyCalls(read, 1);
+            assertSpyCall(read, 0, { args: [ctx] });
+            assertSpyCalls(write, 1);
+            assertEquals(write.calls[0].args[0], ctx);
+            assertEquals(write.calls[0].args[1].convo.length, 1); // one active
+            assertEquals(write.calls[0].args[1].other.length, 1); // one active
             assertSpyCalls(del, 0);
         });
         it("should support conversations that completely immediately after being entered", async () => {
@@ -414,7 +485,7 @@ describe("createConversation", () => {
                             convo: i + 1,
                         });
                     }
-                    await ctx.conversation.enter("other");
+                    await ctx.conversation.enter("other", { parallel: true });
 
                     assertEquals(ctx.conversation.active("convo"), len);
                     assertEquals(ctx.conversation.active("other"), 1);
@@ -649,7 +720,7 @@ describe("createConversation", () => {
                 async (ctx) => {
                     await ctx.conversation.enter("convo");
                     await ctx.conversation.enter("convo", { parallel: true });
-                    await ctx.conversation.enter("other");
+                    await ctx.conversation.enter("other", { parallel: true });
                 },
             );
             await mw.middleware()(ctx, next);
@@ -816,7 +887,7 @@ describe("createConversation", () => {
             assertSpyCalls(del, 0);
         });
     });
-    it("should support resuming parallel and non-parallel conversations", async () => {
+    it("should support resuming conversations", async () => {
         let mw = new Composer<TestContext>();
         let state: ConversationData = {};
         const read = (_ctx: Context) => state;
@@ -840,7 +911,7 @@ describe("createConversation", () => {
         }, "other");
         mw.use(plugin, convo, other, async (ctx) => {
             await ctx.conversation.enter("convo");
-            await ctx.conversation.enter("other");
+            await ctx.conversation.enter("other", { parallel: true });
             await ctx.conversation.enter("other", { parallel: true });
         });
         await mw.middleware()(mkctx(), next);
