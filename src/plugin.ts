@@ -43,10 +43,10 @@ export interface ConversationControls {
 }
 function controls(
     getData: () => ConversationData,
+    canSave: () => boolean,
     // deno-lint-ignore no-explicit-any
     enter: (name: string, ...args: any[]) => Promise<EnterResult>,
-    exit: (name: string) => Promise<void>,
-    canSave: () => boolean,
+    exit?: (name: string) => Promise<void>,
 ): ConversationControls {
     return {
         async enter(name, options) {
@@ -95,8 +95,10 @@ to use `await`?",
                 count += data[key].length;
                 delete data[key];
             }
-            for (let i = 0; i < len; i++) {
-                await exit(name);
+            if (exit !== undefined) {
+                for (let i = 0; i < len; i++) {
+                    await exit(name);
+                }
             }
         },
         async exit(name) {
@@ -104,8 +106,10 @@ to use `await`?",
             if (data[name] === undefined) return;
             const len = data[name].length;
             delete data[name];
-            for (let i = 0; i < len; i++) {
-                await exit(name);
+            if (exit !== undefined) {
+                for (let i = 0; i < len; i++) {
+                    await exit(name);
+                }
             }
         },
         async exitOne(name, index) {
@@ -115,7 +119,9 @@ to use `await`?",
                 index < 0 || data[name].length <= index
             ) return;
             data[name].splice(index, 1);
-            await exit(name);
+            if (exit !== undefined) {
+                await exit(name);
+            }
         },
         // deno-lint-ignore no-explicit-any
         active(name?: string): any {
@@ -177,9 +183,11 @@ export function conversations<C extends Context>(
                 ...args,
             );
         }
-        async function exit(id: string) {
-            await options.onExit?.(id);
-        }
+        const exit = options.onExit === undefined
+            ? async (id: string) => {
+                await options.onExit?.(id);
+            }
+            : undefined;
 
         function canSave() {
             return !(internalCompletenessMarker in ctx);
@@ -188,7 +196,7 @@ export function conversations<C extends Context>(
         Object.defineProperty(ctx, internalMutableState, { get: getData });
         Object.defineProperty(ctx, internalIndex, { value: index });
         Object.defineProperty(ctx, "conversation", {
-            value: controls(getData, enter, exit, canSave),
+            value: controls(getData, canSave, enter, exit),
         });
         await next();
         Object.defineProperty(ctx, internalCompletenessMarker, { value: true });
