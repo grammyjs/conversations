@@ -1039,5 +1039,4 @@ describe("createConversation", () => {
         assertEquals(j, 1);
         assertEquals(k, 0);
     });
-    // TODO: do not touch conversations with a different name
 });
