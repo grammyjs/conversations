@@ -1,9 +1,4 @@
-import {
-    Composer,
-    type Context,
-    type Middleware,
-    type Update,
-} from "./deps.deno.ts";
+import { type Context, type Update } from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -17,7 +12,6 @@ export interface ExternalOp<F extends (...args: any[]) => any, I = any> {
 }
 
 export class Conversation<C extends Context> {
-    private readonly middleware = new Composer<C>();
     constructor(
         private controls: ReplayControls,
         private hydrate: (update: Update) => C,
