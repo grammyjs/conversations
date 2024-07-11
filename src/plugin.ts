@@ -15,6 +15,12 @@ const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
 const internalCompletenessMarker = Symbol("conversations.completeness");
 
+interface ContextBaseData {
+    update: Update;
+    api: Api;
+    me: UserFromGetMe;
+}
+
 type MaybePromise<T> = T | Promise<T>;
 export interface ConversationOptions<C extends Context> {
     read(ctx: C): MaybePromise<ConversationData | undefined>;
@@ -175,13 +181,12 @@ export function conversations<C extends Context>(
                 );
             }
             await options.onEnter?.(id);
-            return await enterConversation(
-                builder,
-                ctx.update,
-                ctx.api,
-                ctx.me,
-                ...args,
-            );
+            const base: ContextBaseData = {
+                update: ctx.update,
+                api: ctx.api,
+                me: ctx.me,
+            };
+            return await enterConversation(builder, base, ...args);
         }
         const exit = options.onExit === undefined
             ? async (id: string) => {
@@ -286,13 +291,16 @@ export function createConversation<C extends Context>(
         index.set(id, builder);
 
         const mutableData = ctx[internalMutableState] as ConversationData;
+        const base: ContextBaseData = {
+            update: ctx.update,
+            api: ctx.api,
+            me: ctx.me,
+        };
         const result = await runParallelConversations(
             builder,
             id,
             mutableData, // will be mutated on ctx
-            ctx.update,
-            ctx.api,
-            ctx.me,
+            base,
         );
         switch (result.status) {
             case "error":
@@ -307,21 +315,13 @@ export async function runParallelConversations<C extends Context>(
     builder: ConversationBuilder<C>,
     id: string,
     data: ConversationData,
-    update: Update,
-    api: Api,
-    me: UserFromGetMe,
+    base: ContextBaseData,
 ): Promise<ConversationResult> {
     if (!(id in data)) return { status: "skipped" };
     const states = data[id];
     const len = states.length;
     for (let i = 0; i < len; i++) {
-        const result = await resumeConversation(
-            builder,
-            update,
-            api,
-            me,
-            states[i],
-        );
+        const result = await resumeConversation(builder, base, states[i]);
         switch (result.status) {
             case "skipped":
                 continue;
@@ -357,9 +357,7 @@ export interface EnterSkipped extends ConversationSkipped {
 
 export async function enterConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
-    update: Update,
-    api: Api,
-    me: UserFromGetMe,
+    base: ContextBaseData,
     // deno-lint-ignore no-explicit-any
     ...args: any[]
 ): Promise<EnterResult> {
@@ -370,13 +368,7 @@ export async function enterConversation<C extends Context>(
         replay: initialState,
         interrupts: [int],
     };
-    const result = await resumeConversation(
-        conversation,
-        update,
-        api,
-        me,
-        state,
-    );
+    const result = await resumeConversation(conversation, base, state);
     switch (result.status) {
         case "complete":
         case "error":
@@ -395,9 +387,7 @@ export async function enterConversation<C extends Context>(
 
 export async function resumeConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
-    update: Update,
-    api: Api,
-    me: UserFromGetMe,
+    { update, api, me }: ContextBaseData,
     state: ConversationState,
 ): Promise<ConversationResult> {
     const args = JSON.parse(state.args);
