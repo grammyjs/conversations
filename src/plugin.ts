@@ -188,7 +188,7 @@ export function conversations<C extends Context>(
             };
             return await enterConversation(builder, base, ...args);
         }
-        const exit = options.onExit === undefined
+        const exit = options.onExit !== undefined
             ? async (id: string) => {
                 await options.onExit?.(id);
             }
