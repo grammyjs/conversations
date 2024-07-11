@@ -56,6 +56,7 @@ function controls(
                 );
             }
             const data = getData();
+            // TODO: parallel should be required for running two unrelated conversions in the same chat
             if (data[name] === undefined) {
                 data[name] = [];
             } else if (!options?.parallel) {
