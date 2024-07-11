@@ -56,12 +56,10 @@ function controls(
                 );
             }
             const data = getData();
-            // TODO: parallel should be required for running two unrelated conversions in the same chat
-            if (data[name] === undefined) {
-                data[name] = [];
-            } else if (!options?.parallel) {
+            if (Object.keys(data).length > 0 && !options?.parallel) {
                 throw new Error("This conversation was already entered");
             }
+            data[name] ??= [];
             const result = await enter(name, ...options?.args ?? []);
             if (!canSave()) {
                 throw new Error(
