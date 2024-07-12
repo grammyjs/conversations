@@ -10,6 +10,7 @@ import { enterConversation } from "../src/plugin.ts";
 import {
     assert,
     assertEquals,
+    assertInstanceOf,
     assertNotStrictEquals,
     describe,
     it,
@@ -87,9 +88,84 @@ describe("Conversation", () => {
         assertEquals(j, 1);
         assertEquals(k, 0);
     });
-    // TODO: external with plain data
-    // TODO: external with custom serialsation for values
-    // TODO: external with custom serialsation for errors
+    it("should support external", async () => {
+        const expected = mkctx();
+        let i = 0;
+        let rnd = 0;
+        async function convo(conversation: Convo) {
+            const x = await conversation.external(() => Math.random());
+            rnd = x;
+            await conversation.wait();
+            assertEquals(rnd, x);
+            i++;
+        }
+        const first = await enterConversation(convo, expected);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, expected, copy);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
+    });
+    it("should support external with custom serialisation formats", async () => {
+        const expected = mkctx();
+        let i = 0;
+        async function convo(conversation: Convo) {
+            const x = await conversation.external({
+                task: (key: string) => new Map([[key, Math.random()]]),
+                args: ["rnd"],
+                beforeStore: (map) => Array.from(map.entries()),
+                afterLoad: (entries) => new Map(entries),
+            });
+            await conversation.wait();
+            assertInstanceOf(x, Map);
+            i++;
+        }
+        const first = await enterConversation(convo, expected);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, expected, copy);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
+    });
+    it("should support external with custom error formats", async () => {
+        const expected = mkctx();
+        let i = 0;
+        let j = 0;
+        class MyError extends Error {
+            name = "errands";
+        }
+        async function convo(conversation: Convo) {
+            try {
+                await conversation.external({
+                    task: () => {
+                        throw new MyError("meh");
+                    },
+                    beforeStoreError: (e) =>
+                        e instanceof MyError ? e.message : e,
+                    afterLoadError: (e) =>
+                        typeof e === "string" ? new MyError(e) : e,
+                });
+                j++;
+            } catch (e) {
+                assertInstanceOf(e, MyError);
+            }
+            await conversation.wait();
+            i++;
+        }
+        const first = await enterConversation(convo, expected);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, expected, copy);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
+        assertEquals(j, 0);
+    });
     // TODO: concurrent wait/skip/halt/external
     // TODO: common cases such as loops with side-effects, or floating checks
 });
