@@ -6,18 +6,24 @@ import {
     type UserFromGetMe,
 } from "../src/deps.deno.ts";
 import {
+    type ConversationBuilder,
     type ConversationContext,
     type ConversationData,
     conversations,
     createConversation,
+    enterConversation,
+    resumeConversation,
 } from "../src/plugin.ts";
 import { resolver } from "../src/resolve.ts";
 import {
+    assert,
     assertEquals,
     assertInstanceOf,
+    assertNotStrictEquals,
     assertRejects,
     assertSpyCall,
     assertSpyCalls,
+    assertStrictEquals,
     assertThrows,
     describe,
     it,
@@ -1038,5 +1044,30 @@ describe("createConversation", () => {
         assertEquals(i, 2);
         assertEquals(j, 1);
         assertEquals(k, 0);
+    });
+});
+
+describe("enterConversation and resumeConversation", () => {
+    it("should work", async () => {
+        const expected = mkctx();
+        let i = 0;
+        const convo: ConversationBuilder<Context> = async (
+            conversation,
+            _ctx,
+            param: string,
+        ) => {
+            assertEquals(param, "input");
+            const ctx = await conversation.wait();
+            assertNotStrictEquals(ctx, expected);
+            assertStrictEquals(ctx.update, expected.update);
+            i++;
+        };
+        const first = await enterConversation(convo, mkctx(), "input");
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, expected, first);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
     });
 });
