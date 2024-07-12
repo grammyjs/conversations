@@ -5,8 +5,7 @@ import {
     type Update,
     type UserFromGetMe,
 } from "../src/deps.deno.ts";
-import { resumeConversation } from "../src/mod.ts";
-import { enterConversation } from "../src/plugin.ts";
+import { enterConversation, resumeConversation } from "../src/plugin.ts";
 import {
     assert,
     assertEquals,
@@ -14,6 +13,7 @@ import {
     assertNotStrictEquals,
     describe,
     it,
+    stub,
 } from "./deps.test.ts";
 
 type Convo = Conversation<Context>;
@@ -31,6 +31,9 @@ describe("Conversation", () => {
             ctx = await conversation.wait();
             assertNotStrictEquals(ctx, expected);
             assertEquals(ctx.update, expected.update);
+            ctx = await conversation.wait();
+            assertNotStrictEquals(ctx, expected);
+            assertEquals(ctx.update, expected.update);
             i++;
         }
         const first = await enterConversation(convo, expected);
@@ -38,8 +41,37 @@ describe("Conversation", () => {
         assert(first.status === "handled");
         const copy = structuredClone(first);
         const second = await resumeConversation(convo, expected, copy);
-        assertEquals(second.status, "complete");
-        assert(second.status === "complete");
+        assertEquals(second.status, "handled");
+        assert(second.status === "handled");
+        const otherCopy = { ...structuredClone(second), args: first.args };
+        const third = await resumeConversation(convo, expected, otherCopy);
+        assertEquals(third.status, "complete");
+        assert(third.status === "complete");
+        assertEquals(i, 1);
+    });
+    it("should wait concurrently", async () => {
+        const expected = mkctx();
+        let i = 0;
+        async function convo(conversation: Convo) {
+            conversation.wait().then(() => {
+                conversation.wait().then(() => i++);
+            });
+            await conversation.wait();
+        }
+        const first = await enterConversation(convo, expected);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, expected, copy);
+        assertEquals(second.status, "handled");
+        assert(second.status === "handled");
+        const otherCopy = { ...structuredClone(second), args: first.args };
+        const third = await resumeConversation(convo, expected, otherCopy);
+        assertEquals(third.status, "handled");
+        assert(third.status === "handled");
+        const thirdCopy = { ...structuredClone(third), args: first.args };
+        const fourth = await resumeConversation(convo, expected, thirdCopy);
+        assert(fourth.status === "complete");
         assertEquals(i, 1);
     });
     it("should skip", async () => {
@@ -166,6 +198,121 @@ describe("Conversation", () => {
         assertEquals(i, 1);
         assertEquals(j, 0);
     });
-    // TODO: concurrent wait/skip/halt/external
-    // TODO: common cases such as loops with side-effects, or floating checks
+    it("should support concurrent wait/skip/halt/API calls", async () => {
+        let i = 0;
+        const methods: string[] = [];
+        const payloads: unknown[] = [];
+        const pattern = new URLPattern({ pathname: "/botdummy/:method" });
+        using _ = stub(
+            globalThis,
+            "fetch",
+            (url, opts) => {
+                if (typeof url !== "string") throw new Error("bad url");
+                const method = pattern.exec(url)?.pathname.groups.method;
+                if (method === undefined) throw new Error("bad method");
+                const body = opts?.body;
+                if (typeof body !== "string") throw new Error("bad body");
+                const payload = JSON.parse(body);
+                methods.push(method);
+                payloads.push(payload);
+                return Promise.resolve(
+                    new Response(JSON.stringify({ ok: true, result: i++ })),
+                );
+            },
+        );
+
+        async function convo(conversation: Convo, ctx: Context) {
+            const p = conversation.wait(); // 0
+            console.log("after first wait");
+            ctx = await conversation.wait(); // 1
+            // deno-lint-ignore no-explicit-any
+            ctx.reply((ctx.update as any).one);
+            const [l, r] = await p.then(async (res) => {
+                const c = await conversation.wait(); // 2-4
+                if ("no" in c.update) await conversation.skip(); // 3-4
+                ctx.reply("go").then(() =>
+                    // deno-lint-ignore no-explicit-any
+                    ctx.reply((res.update as any).deferred)
+                );
+                return Promise.all([conversation.wait(), conversation.wait()]); // 5, 6-7
+            });
+            if ("no" in ctx.update) {
+                conversation.skip(); // 6
+                // deno-lint-ignore no-explicit-any
+                ctx.reply((l.update as any).two);
+                // deno-lint-ignore no-explicit-any
+                await ctx.reply((r.update as any).three);
+                await conversation.wait(); // never resolves due to skip
+            }
+            conversation.halt();
+            ctx.reply("done");
+            conversation.skip();
+        }
+
+        // 0
+        console.log(0);
+        const first = await enterConversation(convo, mkctx({ deferred: "L8" }));
+        assert(first.status === "handled");
+        const args = first.args;
+        // 1
+        console.log(1);
+        const second = await resumeConversation(
+            convo,
+            mkctx({ one: "way" }),
+            first,
+        );
+        assert(second.status === "handled");
+        // 2
+        console.log(2);
+        const third = await resumeConversation(
+            convo,
+            mkctx({ no: true }),
+            first,
+        );
+        assert(third.status === "skipped");
+        // 3
+        console.log(3);
+        const fourth = await resumeConversation(
+            convo,
+            mkctx({ no: true }),
+            first,
+        );
+        assert(fourth.status === "skipped");
+        // 4
+        console.log(4);
+        const fifth = await resumeConversation(
+            convo,
+            mkctx(),
+            { ...second, args },
+        );
+        assert(fifth.status === "handled");
+        // 5
+        console.log(5);
+        const sixth = await resumeConversation(
+            convo,
+            mkctx({ two: "fold" }),
+            { ...fifth, args },
+        );
+        assert(sixth.status === "handled");
+        // 6
+        console.log(6);
+        const seventh = await resumeConversation(
+            convo,
+            mkctx({ three: "dimensional" }),
+            { ...sixth, args },
+        );
+        assert(seventh.status === "skipped");
+        const eighth = await resumeConversation(
+            convo,
+            mkctx(),
+            { ...sixth, args },
+        );
+        assert(eighth.status === "skipped");
+
+        assertEquals(methods, Array(6).fill("sendMessage"));
+        assertEquals(payloads, []);
+    });
+
+    // TODO: concurrent external
+    // TODO: common cases such as loops with side-effects
 });
