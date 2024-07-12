@@ -99,6 +99,10 @@ async function replayState(
 
     // Define replay controls
     async function interrupt(key?: string) {
+        if (interrupted && interrupts.length === 0) {
+            // Already canceled, so we must no longer perform an interrupt.
+            await boom();
+        }
         begin();
         const res = await cur.perform(async (op) => {
             interrupted = true;
