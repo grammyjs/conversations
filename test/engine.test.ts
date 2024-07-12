@@ -308,7 +308,7 @@ describe("ReplayEngine", () => {
         assertSpyCall(action, 0, { returned: 0 });
         assertSpyCall(action, 1, { returned: 1 });
     });
-    it("supports canceling", async () => {
+    it("should support canceling", async () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
             const res = await c.action(() => i++);
@@ -334,7 +334,7 @@ describe("ReplayEngine", () => {
             returned: new Promise(() => {/* pending */}),
         });
     });
-    it("supports floating cancel ops", async () => {
+    it("should support floating cancel ops", async () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
             const res0 = await c.interrupt();
