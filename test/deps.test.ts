@@ -1,3 +1,3 @@
-export * from "https://deno.land/std@0.204.0/assert/mod.ts";
-export * from "https://deno.land/std@0.204.0/testing/bdd.ts";
-export * from "https://deno.land/std@0.204.0/testing/mock.ts";
+export * from "jsr:@std/assert";
+export * from "jsr:@std/testing/bdd";
+export * from "jsr:@std/testing/mock";
