@@ -232,29 +232,29 @@ export function conversations<C extends Context>(
     };
 }
 
-interface ConversationState {
+export interface ConversationState {
     args: string;
     replay: ReplayState;
     interrupts: number[];
 }
-type ConversationResult =
+export type ConversationResult =
     | ConversationComplete
     | ConversationError
     | ConversationHandled
     | ConversationSkipped;
-interface ConversationComplete {
+export interface ConversationComplete {
     status: "complete";
 }
-interface ConversationError {
+export interface ConversationError {
     status: "error";
     error: unknown;
 }
-interface ConversationHandled {
+export interface ConversationHandled {
     status: "handled";
     replay: ReplayState;
     interrupts: number[];
 }
-interface ConversationSkipped {
+export interface ConversationSkipped {
     status: "skipped";
 }
 
