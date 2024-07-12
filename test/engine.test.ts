@@ -340,7 +340,8 @@ describe("ReplayEngine", () => {
             const res0 = await c.interrupt();
             assertEquals(res0, "zero");
             c.cancel("x");
-            const res1 = await c.interrupt();
+            // The interrupt has no effect since we already called cancel
+            const res1 = await c.interrupt("y");
             assertEquals(res1, "one");
             i++;
         });
@@ -349,14 +350,10 @@ describe("ReplayEngine", () => {
         assert(result.type === "interrupted");
         ReplayEngine.supply(result.state, result.interrupts[0], "zero");
         result = await engine.replay(result.state);
-        assert(result.type === "interrupted");
-        ReplayEngine.supply(result.state, result.interrupts[0], "one");
-        result = await engine.replay(result.state);
-        // interrupted due to cancel
-        assert(result.type === "interrupted");
-        assertEquals(result.message, "x");
-        assertEquals(result.interrupts, []);
-        assertSpyCalls(builder, 3);
-        assertEquals(i, 1);
+        assert(result.type === "interrupted"); // interrupted due to cancel
+        assertEquals(result.interrupts, []); // interrupt disregarded
+        assertEquals(result.message, "x"); // message is from cancel not interrupt
+        assertSpyCalls(builder, 2);
+        assertEquals(i, 0);
     });
 });
