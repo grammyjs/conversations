@@ -25,7 +25,8 @@ export function resolver<T>(value?: T): Resolver<T> {
     const rsr = { value, isResolved: () => false } as Resolver<T>;
     rsr.promise = new Promise((resolve) => {
         rsr.resolve = (t = value) => {
-            rsr.isResolved = () => true;
+            // deno-lint-ignore no-explicit-any
+            rsr.isResolved = (() => true) as any; // https://github.com/microsoft/TypeScript/issues/59252
             rsr.value = t;
             resolve(t as T); // cast to handle void
         };
