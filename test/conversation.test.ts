@@ -221,96 +221,114 @@ describe("Conversation", () => {
             },
         );
 
-        async function convo(conversation: Convo, ctx: Context) {
-            const p = conversation.wait(); // 0
-            console.log("after first wait");
-            ctx = await conversation.wait(); // 1
-            // deno-lint-ignore no-explicit-any
-            ctx.reply((ctx.update as any).one);
+        async function convo(conversation: Convo, ctx: Context) { // first
+            const p = conversation.wait(); // second
+            ctx = await conversation.wait(); // third
+            // @ts-expect-error mock
+            ctx.api.raw.sendMessage0({ one: ctx.update.one });
             const [l, r] = await p.then(async (res) => {
-                const c = await conversation.wait(); // 2-4
-                if ("no" in c.update) await conversation.skip(); // 3-4
-                ctx.reply("go").then(() =>
-                    // deno-lint-ignore no-explicit-any
-                    ctx.reply((res.update as any).deferred)
+                const c = await conversation.wait(); // fourth, fifth, sixth
+                if ("no" in c.update) {
+                    await conversation.skip();
+                }
+                // @ts-expect-error mock
+                await ctx.api.raw.sendMessage1({ text: "go" }).then(() =>
+                    // @ts-expect-error moc
+                    ctx.api.raw.sendMessage2({ deferred: res.update.deferred })
                 );
-                return Promise.all([conversation.wait(), conversation.wait()]); // 5, 6-7
+                return Promise.all([
+                    conversation.wait(), // seventh
+                    conversation.wait(), // eighth, nineth
+                ]);
             });
-            if ("no" in ctx.update) {
-                conversation.skip(); // 6
-                // deno-lint-ignore no-explicit-any
-                ctx.reply((l.update as any).two);
-                // deno-lint-ignore no-explicit-any
-                await ctx.reply((r.update as any).three);
+            if ("no" in r.update) {
+                // @ts-expect-error mock
+                await ctx.api.raw.sendMessage3({ two: l.update.two });
+                // @ts-expect-error mock
+                await ctx.api.raw.sendMessage4({ three: r.update.three });
+                conversation.skip();
                 await conversation.wait(); // never resolves due to skip
             }
+            // @ts-expect-error mock
+            await ctx.api.raw.sendMessage5({ text: "done" });
             conversation.halt();
-            ctx.reply("done");
             conversation.skip();
         }
 
-        // 0
-        console.log(0);
-        const first = await enterConversation(convo, mkctx({ deferred: "L8" }));
+        const first = await enterConversation(convo, mkctx());
+        assertEquals(first.status, "handled");
         assert(first.status === "handled");
         const args = first.args;
-        // 1
-        console.log(1);
         const second = await resumeConversation(
             convo,
-            mkctx({ one: "way" }),
+            mkctx({ deferred: "L8" }),
             first,
         );
+        assertEquals(second.status, "handled");
         assert(second.status === "handled");
-        // 2
-        console.log(2);
         const third = await resumeConversation(
             convo,
-            mkctx({ no: true }),
-            first,
+            mkctx({ one: "way" }),
+            { ...second, args },
         );
-        assert(third.status === "skipped");
-        // 3
-        console.log(3);
+        assertEquals(third.status, "handled");
+        assert(third.status === "handled");
         const fourth = await resumeConversation(
             convo,
             mkctx({ no: true }),
-            first,
+            { ...third, args },
         );
+        assertEquals(fourth.status, "skipped");
         assert(fourth.status === "skipped");
-        // 4
-        console.log(4);
         const fifth = await resumeConversation(
             convo,
-            mkctx(),
-            { ...second, args },
+            mkctx({ no: true }),
+            { ...third, args },
         );
-        assert(fifth.status === "handled");
-        // 5
-        console.log(5);
+        assertEquals(fifth.status, "skipped");
+        assert(fifth.status === "skipped");
         const sixth = await resumeConversation(
             convo,
-            mkctx({ two: "fold" }),
-            { ...fifth, args },
+            mkctx(),
+            { ...third, args },
         );
+        assertEquals(sixth.status, "handled");
         assert(sixth.status === "handled");
-        // 6
-        console.log(6);
         const seventh = await resumeConversation(
             convo,
-            mkctx({ three: "dimensional" }),
+            mkctx({ two: "fold" }),
             { ...sixth, args },
         );
-        assert(seventh.status === "skipped");
+        assertEquals(seventh.status, "handled");
+        assert(seventh.status === "handled");
         const eighth = await resumeConversation(
             convo,
-            mkctx(),
-            { ...sixth, args },
+            mkctx({ no: true, three: "dimensional" }),
+            { ...seventh, args },
         );
+        assertEquals(eighth.status, "skipped");
         assert(eighth.status === "skipped");
+        const nineth = await resumeConversation(
+            convo,
+            mkctx(),
+            { ...seventh, args },
+        );
+        assertEquals(nineth.status, "skipped");
+        assert(nineth.status === "skipped");
 
-        assertEquals(methods, Array(6).fill("sendMessage"));
-        assertEquals(payloads, []);
+        assertEquals(i, 6);
+        assertEquals(
+            methods,
+            Array(i).fill("sendMessage").map((m, i) => m + i),
+        );
+        assertEquals(payloads, [
+            { one: "way" },
+            { text: "go" },
+            { deferred: "L8" },
+            { two: "fold" },
+            { three: "dimensional" },
+            { text: "done" },
+        ]);
     });
 
     // TODO: concurrent external
