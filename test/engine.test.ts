@@ -249,6 +249,29 @@ describe("ReplayEngine", () => {
         assertSpyCall(action, 0, { returned: 0 });
         assertSpyCall(action, 1, { returned: 1 });
     });
+    it("should support cascading interrupts", async () => {
+        let i = 0;
+        const builder = spy((c: ReplayControls) => {
+            c.interrupt().then((i0) => {
+                c.interrupt().then((i1) => {
+                    c.interrupt().then((i2) => {
+                        assertEquals([i0, i1, i2], ["one", "two", "three"]);
+                        i++;
+                    });
+                });
+            });
+        });
+        const engine = new ReplayEngine(builder);
+        let result = await engine.play();
+        for (const inject of ["one", "two", "three"]) {
+            assert(result.type === "interrupted");
+            ReplayEngine.supply(result.state, result.interrupts[0], inject);
+            result = await engine.replay(result.state);
+        }
+        assert(result.type === "returned");
+        assertSpyCalls(builder, 4);
+        assertEquals(i, 1);
+    });
     it("should support cascading interrupts and actions", async () => {
         let inner = false;
         let i = 0;
