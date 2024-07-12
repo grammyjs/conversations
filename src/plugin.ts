@@ -15,7 +15,7 @@ const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
 const internalCompletenessMarker = Symbol("conversations.completeness");
 
-interface ContextBaseData {
+export interface ContextBaseData {
     update: Update;
     api: Api;
     me: UserFromGetMe;
