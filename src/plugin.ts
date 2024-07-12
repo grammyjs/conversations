@@ -402,7 +402,10 @@ export async function resumeConversation<C extends Context>(
     // (parallel wait calls, floating promises basically). We replay the
     // conversation once for each of these interrupts until one of them does not
     // skip the update (actually handles it in a meaningful way).
-    for (const int of state.interrupts) {
+    const ints = state.interrupts;
+    const len = ints.length;
+    for (let i = 0; i < len; i++) {
+        const int = ints[i];
         const checkpoint = ReplayEngine.supply(replayState, int, update);
         const result = await engine.replay(replayState);
         switch (result.type) {
