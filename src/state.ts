@@ -1,8 +1,6 @@
 import { resolver } from "./resolve.ts";
 
-// const LISTENERS = Symbol.for("grammy.conversations.replay.listener");
 export interface ReplayState {
-    // [LISTENERS]?: Array<() => void>;
     send: SendOp[];
     receive: ReceiveOp[];
 }
