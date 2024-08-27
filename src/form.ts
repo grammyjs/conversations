@@ -1,4 +1,5 @@
-import { type Context } from "./deps.deno.ts";
+import { OtherwiseConfig } from "./conversation.ts";
+import { type Context, Filter, FilterQuery } from "./deps.deno.ts";
 
 /**
  * Form building utilities that are exposed on `conversation.form`.
@@ -17,6 +18,10 @@ export class ConversationForm<C extends Context> {
     constructor(
         private readonly conversation: {
             wait: () => Promise<C>;
+            waitFor: <Q extends FilterQuery>(
+                query: Q,
+                opts?: OtherwiseConfig<C>,
+            ) => Promise<Filter<C, Q>>;
             skip: () => Promise<never>;
         },
     ) {}
@@ -30,14 +35,9 @@ export class ConversationForm<C extends Context> {
      * @param otherwise Handler that will be run for skipped updates
      * @returns The received text
      */
-    async text(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
-        const ctx = await this.conversation.wait();
-        const text = ctx.msg?.text ?? ctx.msg?.caption;
-        if (text === undefined) {
-            await otherwise?.(ctx);
-            return await this.conversation.skip();
-        }
-        return text;
+    text(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
+        return this.conversation.waitFor(":text", { otherwise })
+            .then((ctx) => ctx.msg.text);
     }
 
     // TODO: add match which returns `ctx.match` after `ctx.hasMatch`
@@ -53,8 +53,8 @@ export class ConversationForm<C extends Context> {
      * @returns The received number
      */
     async number(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
-        const ctx = await this.conversation.wait();
-        const num = parseFloat(ctx.msg?.text ?? ctx.msg?.caption ?? "NaN");
+        const ctx = await this.conversation.waitFor(":text", { otherwise });
+        const num = parseFloat(ctx.msg.text);
         if (isNaN(num)) {
             await otherwise?.(ctx);
             return await this.conversation.skip();
@@ -88,8 +88,8 @@ export class ConversationForm<C extends Context> {
                 : typeof options === "function"
                 ? { otherwise: options }
                 : options;
-        const ctx = await this.conversation.wait();
-        const text = ctx.msg?.text ?? ctx.msg?.caption ?? "NaN";
+        const ctx = await this.conversation.waitFor(":text", { otherwise });
+        const text = ctx.msg.text;
         const num = parseInt(text, radix);
         if (isNaN(num)) {
             await otherwise?.(ctx);
@@ -115,8 +115,8 @@ export class ConversationForm<C extends Context> {
         otherwise?: (ctx: C) => Promise<unknown> | unknown,
     ) {
         const opts: string[] = options;
-        const ctx = await this.conversation.wait();
-        const text = ctx.msg?.text ?? ctx.msg?.caption;
+        const ctx = await this.conversation.waitFor(":text", { otherwise });
+        const text = ctx.msg.text;
         if (text === undefined || !opts.includes(text)) {
             await otherwise?.(ctx);
             return await this.conversation.skip();
@@ -137,8 +137,10 @@ export class ConversationForm<C extends Context> {
      * @returns The received number
      */
     async url(otherwise?: (ctx: C) => unknown | Promise<unknown>) {
-        const ctx = await this.conversation.wait();
-        const text = ctx.msg?.text ?? ctx.msg?.caption ?? "";
+        const ctx = await this.conversation.waitFor(":entities:url", {
+            otherwise,
+        });
+        const [{ text }] = ctx.entities("url");
         let url: URL;
         try {
             url = new URL(text);

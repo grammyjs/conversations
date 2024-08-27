@@ -11,5 +11,6 @@
         "https://x.nest.land": true,
         "https://crux.land": true,
         "https://lib.deno.dev": false
-    }
+    },
+    "editor.defaultFormatter": "denoland.vscode-deno"
 }
