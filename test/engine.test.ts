@@ -3,6 +3,7 @@ import { resolver } from "../src/resolve.ts";
 import {
     assert,
     assertEquals,
+    assertFalse,
     assertGreater,
     assertSpyCall,
     assertSpyCalls,
@@ -91,12 +92,17 @@ describe("ReplayEngine", () => {
         let i = 0;
         const action = spy(() => Promise.resolve(i++));
         const builder = spy(async (c: ReplayControls) => {
-            c.action(action);
+            let order = "a";
+            c.action(action).then(() => order += "b");
             const int = await c.interrupt();
-            c.action(action);
+            order += "c";
+            c.action(action).then(() => order += "e");
+            order += "d";
             const res = await c.action(action);
+            order += "f";
             assertEquals(int, "inject");
             assertEquals(res, 2);
+            assertEquals(order, "abcdef");
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
@@ -140,9 +146,7 @@ describe("ReplayEngine", () => {
         let result = await resultP;
         assert(result.type === "interrupted");
         assertSpyCalls(action, 1);
-        assertSpyCall(action, 0, {
-            returned: new Promise<never>(() => {/* pending */}),
-        });
+        assertSpyCall(action, 0, { returned: Promise.resolve(undefined) });
 
         ReplayEngine.supply(result.state, result.interrupts[0], "inject");
         resultP = engine.replay(result.state);
@@ -223,43 +227,85 @@ describe("ReplayEngine", () => {
     });
     it("should support floating interrupts", async () => {
         let i = 0;
-        const action = spy(() => i++);
+        const action = spy(() =>
+            new Promise((r) => setTimeout(() => r(i++), 0))
+        );
+        let doneInitialPlay = false;
         const builder = spy(async (c: ReplayControls) => {
             c.interrupt();
             const r0 = await c.action(action);
             assertEquals(r0, 0);
+            // assertFalse(doneInitialPlay);
             const int = await c.interrupt();
-            c.interrupt();
             const r1 = await c.action(action);
             assertEquals(int, "inject");
             assertEquals(r1, 1);
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
-        for (const inject of ["never", "inject", "never"]) {
+        doneInitialPlay = true;
+        for (const inject of ["never", "inject"]) {
+            assertEquals(result.type, "interrupted");
             assert(result.type === "interrupted");
             ReplayEngine.supply(result.state, result.interrupts[0], inject);
             result = await engine.replay(result.state);
         }
         assert(result.type === "returned");
-        assertSpyCalls(builder, 4);
-        assertSpyCall(builder, 3, { returned: Promise.resolve(undefined) });
+        assertSpyCalls(builder, 3);
+        assertSpyCall(builder, 2, { returned: Promise.resolve(undefined) });
         assertEquals(i, 2);
         assertSpyCalls(action, 2);
+        assertSpyCall(action, 0, { returned: Promise.resolve(0) });
+        assertSpyCall(action, 1, { returned: Promise.resolve(1) });
+    });
+    it("should discard dangling interrupts upon return", async () => {
+        let i = 0;
+        let j = 0;
+        const action = spy(() => i++);
+        const builder = spy(async (c: ReplayControls) => {
+            console.log("begin");
+            c.interrupt().then(() => {
+                console.log("first int resolve");
+                c.action(action);
+            });
+            console.log("await int");
+            await c.interrupt();
+            console.log("resolve int, start float");
+            c.interrupt(); // never resolves
+            j++;
+            console.log("end");
+        });
+        const engine = new ReplayEngine(builder);
+        let result = await engine.play();
+        for (const inject of ["floating", "awaited"]) {
+            assert(result.type === "interrupted");
+            ReplayEngine.supply(result.state, result.interrupts[0], inject);
+            result = await engine.replay(result.state);
+        }
+        if (result.type !== "returned") {
+            console.log(result);
+        }
+        assert(result.type === "returned");
+        assertSpyCalls(builder, 3);
+        assertEquals(i, 1);
+        assertEquals(j, 1);
+        assertSpyCalls(action, 1);
         assertSpyCall(action, 0, { returned: 0 });
-        assertSpyCall(action, 1, { returned: 1 });
     });
     it("should support cascading interrupts", async () => {
         let i = 0;
-        const builder = spy((c: ReplayControls) => {
+        const builder = spy(async (c: ReplayControls) => {
+            const rsr = resolver();
             c.interrupt().then((i0) => {
                 c.interrupt().then((i1) => {
                     c.interrupt().then((i2) => {
                         assertEquals([i0, i1, i2], ["one", "two", "three"]);
                         i++;
+                        rsr.resolve();
                     });
                 });
             });
+            await rsr.promise; // do not finish function before cascade
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
@@ -276,7 +322,8 @@ describe("ReplayEngine", () => {
         let inner = false;
         let i = 0;
         const action = spy(() => i++);
-        const builder = spy((c: ReplayControls) => {
+        const builder = spy(async (c: ReplayControls) => {
+            const rsr = resolver();
             c.interrupt().then((i0) => {
                 assertEquals(i0, "one");
                 c.action(action).then((r0) => {
@@ -287,14 +334,18 @@ describe("ReplayEngine", () => {
                             assertEquals(r1, 1);
                             assertEquals(await c.interrupt(), "three");
                             inner = true;
+                            rsr.resolve();
                         });
                     });
                 });
             });
+            await rsr.promise;
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
         for (const inject of ["one", "two", "three"]) {
+            if (result.type !== "interrupted") console.log(inject);
+            assertEquals(result.type, "interrupted");
             assert(result.type === "interrupted");
             ReplayEngine.supply(result.state, result.interrupts[0], inject);
             result = await engine.replay(result.state);
@@ -302,7 +353,7 @@ describe("ReplayEngine", () => {
         assert(result.type === "returned");
         assert(inner);
         assertSpyCalls(builder, 4);
-        assertSpyCall(builder, 3, { returned: undefined });
+        assertSpyCall(builder, 3, { returned: Promise.resolve(undefined) });
         assertEquals(i, 2);
         assertSpyCalls(action, 2);
         assertSpyCall(action, 0, { returned: 0 });

@@ -29,6 +29,7 @@ export function resolver<T>(value?: T): Resolver<T> {
             rsr.isResolved = (() => true) as any; // https://github.com/microsoft/TypeScript/issues/59252
             rsr.value = t;
             resolve(t as T); // cast to handle void
+            rsr.resolve = () => {}; // double resolve is no-op
         };
     });
     return rsr;
