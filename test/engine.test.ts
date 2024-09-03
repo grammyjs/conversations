@@ -230,12 +230,12 @@ describe("ReplayEngine", () => {
         const action = spy(() =>
             new Promise((r) => setTimeout(() => r(i++), 0))
         );
-        let doneInitialPlay = false;
+        let initialPlay = true;
         const builder = spy(async (c: ReplayControls) => {
             c.interrupt();
             const r0 = await c.action(action);
             assertEquals(r0, 0);
-            // assertFalse(doneInitialPlay);
+            await c.action(() => assert(initialPlay));
             const int = await c.interrupt();
             const r1 = await c.action(action);
             assertEquals(int, "inject");
@@ -243,7 +243,7 @@ describe("ReplayEngine", () => {
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
-        doneInitialPlay = true;
+        initialPlay = false;
         for (const inject of ["never", "inject"]) {
             assertEquals(result.type, "interrupted");
             assert(result.type === "interrupted");
@@ -263,17 +263,12 @@ describe("ReplayEngine", () => {
         let j = 0;
         const action = spy(() => i++);
         const builder = spy(async (c: ReplayControls) => {
-            console.log("begin");
             c.interrupt().then(() => {
-                console.log("first int resolve");
                 c.action(action);
             });
-            console.log("await int");
             await c.interrupt();
-            console.log("resolve int, start float");
             c.interrupt(); // never resolves
             j++;
-            console.log("end");
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
@@ -282,9 +277,7 @@ describe("ReplayEngine", () => {
             ReplayEngine.supply(result.state, result.interrupts[0], inject);
             result = await engine.replay(result.state);
         }
-        if (result.type !== "returned") {
-            console.log(result);
-        }
+        if (result.type !== "returned") console.log(result);
         assert(result.type === "returned");
         assertSpyCalls(builder, 3);
         assertEquals(i, 1);

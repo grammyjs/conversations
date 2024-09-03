@@ -78,25 +78,15 @@ async function replayState(
     const actions = new Set<number>();
     function updateBoundary() {
         if (interrupted && actions.size === 0) {
-            console.log("I think I am done here, resolving boundary");
-            // TODO: add test case for floating int, awaited action, awaited int
-            // ... the action should prevent the floating int from completing
-            // the race prematurely
             boundary.resolve();
         }
     }
     async function runBoundary() {
         while (!boundary.isResolved()) {
             await boundary.promise;
-            console.log("boundary resolved, waiting for microtasks");
             // clear microtask queue and check if another action was started
             await new Promise((r) => setTimeout(r, 0));
-            console.log(
-                "next task: boundary.isResolved() is",
-                boundary.isResolved(),
-            );
         }
-        console.log("actually resolved boundary");
     }
 
     // Set up event loop tracking to prevent
@@ -150,7 +140,6 @@ async function replayState(
         return await boom();
     }
     async function action<R>(fn: () => R | Promise<R>, key?: string) {
-        console.log("action go");
         begin();
         const res = await cur.perform(async (op) => {
             actions.add(op);
@@ -160,7 +149,6 @@ async function replayState(
             return ret;
         }, key) as R;
         end();
-        console.log("action done");
         return res;
     }
     const controls: ReplayControls = { interrupt, cancel, action };
@@ -168,9 +156,7 @@ async function replayState(
     // Perform replay
     async function run() {
         returnValue = await builder(controls);
-        console.log("actually returned");
         returned = true;
-        console.log("return value set");
         // wait for pending ops to complete
         while (promises > 0) {
             await dirty.promise;
@@ -179,14 +165,9 @@ async function replayState(
         }
     }
     try {
-        console.log("race start via", new Error("trace").stack);
         const boundaryPromise = runBoundary();
         const runPromise = run();
         await Promise.race([boundaryPromise, runPromise]);
-        console.log(
-            "race complete with boundary resolved",
-            boundary.isResolved(),
-        );
         if (returned) {
             return { type: "returned", returnValue };
         } else if (boundary.isResolved()) {
