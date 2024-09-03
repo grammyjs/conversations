@@ -481,5 +481,38 @@ describe("Conversation", () => {
         assertEquals(i, 1);
         assertEquals(j, 0);
     });
+    it("should prevent waits calls inside external", async () => {
+        const ctx = mkctx();
+        let i = 0;
+        async function convo(conversation: Convo) {
+            await conversation.external({
+                task: async () => {
+                    await assertRejects(() => conversation.wait());
+                    i++;
+                },
+            });
+        }
+        const result = await enterConversation(convo, ctx);
+        if (result.status !== "complete") console.log(result);
+        assertEquals(result.status, "complete");
+        assertEquals(i, 1);
+    });
+    it("should prevent wait calls concurrent to external", async () => {
+        const ctx = mkctx();
+        let i = 0;
+        async function convo(conversation: Convo) {
+            const rsr = resolver();
+            const p = conversation.external(() => rsr.promise);
+            await assertRejects(() => conversation.wait());
+            rsr.resolve();
+            await p;
+            i++;
+        }
+        const result = await enterConversation(convo, ctx);
+        if (result.status !== "complete") console.log(result);
+        assertEquals(result.status, "complete");
+        assertEquals(i, 1);
+    });
+
     // TODO: common cases such as loops with side-effects
 });
