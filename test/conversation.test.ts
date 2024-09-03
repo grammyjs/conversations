@@ -13,6 +13,7 @@ import {
     assertFalse,
     assertInstanceOf,
     assertNotStrictEquals,
+    assertRejects,
     describe,
     it,
     stub,
@@ -444,7 +445,41 @@ describe("Conversation", () => {
         ]);
         await end.promise;
     });
-
-    // TODO: concurrent external
+    it("should prevent nested calls to external", async () => {
+        const ctx = mkctx();
+        let i = 0;
+        let j = 0;
+        async function convo(conversation: Convo) {
+            await conversation.external({
+                task: async () => {
+                    await assertRejects(() => conversation.external(() => j++));
+                    i++;
+                },
+            });
+        }
+        const result = await enterConversation(convo, ctx);
+        if (result.status !== "complete") console.log(result);
+        assertEquals(result.status, "complete");
+        assertEquals(i, 1);
+        assertEquals(j, 0);
+    });
+    it("should prevent concurrent calls to external", async () => {
+        const ctx = mkctx();
+        let i = 0;
+        let j = 0;
+        async function convo(conversation: Convo) {
+            const rsr = resolver();
+            const p = conversation.external(() => rsr.promise);
+            await assertRejects(() => conversation.external(() => j++));
+            rsr.resolve();
+            await p;
+            i++;
+        }
+        const result = await enterConversation(convo, ctx);
+        if (result.status !== "complete") console.log(result);
+        assertEquals(result.status, "complete");
+        assertEquals(i, 1);
+        assertEquals(j, 0);
+    });
     // TODO: common cases such as loops with side-effects
 });
