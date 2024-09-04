@@ -68,6 +68,31 @@ describe("conversations", () => {
         assertSpyCall(write, 0, { args: [ctx, { convo: [emptyState] }] });
         assertSpyCalls(del, 0);
     });
+    it("should read and write the storage with custom getStorageKey", async () => {
+        const ctx = mkctx();
+        const getStorageKey = () => "key";
+        const read = spy((): ConversationData => ({
+            convo: [emptyState],
+        }));
+        const write = spy(() => {});
+        const del = spy(() => {});
+        const mw = new Composer<TestContext>();
+        mw.use(
+            conversations({
+                storage: { getStorageKey, read, write, delete: del },
+            }),
+            createConversation(() => {}, "convo"),
+        );
+        await mw.middleware()(ctx, next);
+        assertSpyCalls(read, 1);
+        assertSpyCall(read, 0, {
+            args: ["key"],
+            returned: { convo: [emptyState] },
+        });
+        assertSpyCalls(write, 1);
+        assertSpyCall(write, 0, { args: ["key", { convo: [emptyState] }] });
+        assertSpyCalls(del, 0);
+    });
     it("shoud prevent double installations", async () => {
         const mw = new Composer<TestContext>();
         mw.use(
@@ -106,6 +131,26 @@ describe("conversations", () => {
         assertSpyCalls(write, 0);
         assertSpyCalls(del, 1);
         assertSpyCall(del, 0, { args: [ctx] });
+    });
+    it("should delete empty data with custom getStorageKey", async () => {
+        const ctx = mkctx();
+        const getStorageKey = () => "key";
+        const read = spy((): ConversationData => ({ convo: [] }));
+        const write = spy(() => {});
+        const del = spy(() => {});
+        const mw = new Composer<TestContext>();
+        mw.use(
+            conversations({
+                storage: { getStorageKey, read, write, delete: del },
+            }),
+            createConversation(() => {}, "convo"),
+        );
+        await mw.middleware()(ctx, next);
+        assertSpyCalls(read, 1);
+        assertSpyCall(read, 0, { args: ["key"], returned: {} });
+        assertSpyCalls(write, 0);
+        assertSpyCalls(del, 1);
+        assertSpyCall(del, 0, { args: ["key"] });
     });
     it("should skip unnecessary writes", async () => {
         const ctx = mkctx();
