@@ -55,7 +55,7 @@ describe("conversations", () => {
         const del = spy(() => {});
         const mw = new Composer<TestContext>();
         mw.use(
-            conversations({ read, write, delete: del }),
+            conversations({ storage: { read, write, delete: del } }),
             createConversation(() => {}, "convo"),
         );
         await mw.middleware()(ctx, next);
@@ -72,14 +72,18 @@ describe("conversations", () => {
         const mw = new Composer<TestContext>();
         mw.use(
             conversations({
-                read: () => ({}),
-                write: () => {},
-                delete: () => {},
+                storage: {
+                    read: () => ({}),
+                    write: () => {},
+                    delete: () => {},
+                },
             }),
             conversations({
-                read: () => ({}),
-                write: () => {},
-                delete: () => {},
+                storage: {
+                    read: () => ({}),
+                    write: () => {},
+                    delete: () => {},
+                },
             }),
         );
         await assertRejects(() =>
@@ -93,7 +97,7 @@ describe("conversations", () => {
         const del = spy(() => {});
         const mw = new Composer<TestContext>();
         mw.use(
-            conversations({ read, write, delete: del }),
+            conversations({ storage: { read, write, delete: del } }),
             createConversation(() => {}, "convo"),
         );
         await mw.middleware()(ctx, next);
@@ -110,7 +114,7 @@ describe("conversations", () => {
         const del = spy(() => {});
         const mw = new Composer<TestContext>();
         mw.use(
-            conversations({ read, write, delete: del }),
+            conversations({ storage: { read, write, delete: del } }),
             () => {/* abort */},
             createConversation(() => {}, "convo"), // unreachable
         );
@@ -155,7 +159,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c, ctx, arg0, arg1, arg2) => {
                     assertInstanceOf(ctx, Context);
                     assertEquals(arg0, -1);
@@ -186,7 +190,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -211,7 +215,7 @@ describe("createConversation", () => {
             let i = 0;
             let j = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -242,7 +246,7 @@ describe("createConversation", () => {
             let j = 0;
             let k = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -277,7 +281,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -305,7 +309,7 @@ describe("createConversation", () => {
             let i = 0;
             let j = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -338,7 +342,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(() => {
                     i++;
                 }, "convo"),
@@ -362,7 +366,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             const err = new Error("nope");
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(() => {
                     throw err;
                 }, "convo"),
@@ -389,7 +393,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.skip();
@@ -421,7 +425,7 @@ describe("createConversation", () => {
             let i = 0;
             let j = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -453,9 +457,11 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             mw.use(
                 conversations({
-                    read: () => ({}),
-                    write: () => {},
-                    delete: () => {},
+                    storage: {
+                        read: () => ({}),
+                        write: () => {},
+                        delete: () => {},
+                    },
                 }),
                 (ctx) => {
                     assertEquals(ctx.conversation.active("nope"), 0);
@@ -473,7 +479,7 @@ describe("createConversation", () => {
             let j = 0;
             const mw = new Composer<TestContext>();
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     await c.wait();
                 }, "convo"),
@@ -518,7 +524,7 @@ describe("createConversation", () => {
             let p: Promise<unknown>;
 
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -550,7 +556,7 @@ describe("createConversation", () => {
             let i = 0;
             let p: Promise<unknown> | undefined;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -579,7 +585,7 @@ describe("createConversation", () => {
 
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -612,7 +618,7 @@ describe("createConversation", () => {
 
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -646,7 +652,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -673,7 +679,9 @@ describe("createConversation", () => {
             const del = spy((_ctx: Context) => {});
             let mw = new Composer<TestContext>();
             let i = 0;
-            const plugin = conversations({ read, write, delete: del });
+            const plugin = conversations({
+                storage: { read, write, delete: del },
+            });
             mw.use(
                 plugin,
                 createConversation(async (c) => {
@@ -712,7 +720,9 @@ describe("createConversation", () => {
             let mw = new Composer<TestContext>();
             let i = 0;
             let j = 0;
-            const plugin = conversations({ read, write, delete: del });
+            const plugin = conversations({
+                storage: { read, write, delete: del },
+            });
             mw.use(
                 plugin,
                 createConversation(async (c) => {
@@ -766,9 +776,7 @@ describe("createConversation", () => {
                 let i = 0;
                 const res: string[] = [];
                 const plugin = conversations({
-                    read,
-                    write,
-                    delete: del,
+                    storage: { read, write, delete: del },
                     onEnter,
                     onExit,
                 });
@@ -841,7 +849,7 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(async (c) => {
                     i++;
                     await c.wait();
@@ -868,14 +876,16 @@ describe("createConversation", () => {
             const mw = new Composer<TestContext>();
             let i = 0;
             mw.use(
-                conversations({ read, write, delete: del }),
+                conversations({ storage: { read, write, delete: del } }),
                 createConversation(
                     async (_c, ctx: ConversationContext<Context>) => {
                         await assertRejects(async () => {
                             const recursive = conversations({
-                                read: () => ({}),
-                                write: () => {},
-                                delete: () => {},
+                                storage: {
+                                    read: () => ({}),
+                                    write: () => {},
+                                    delete: () => {},
+                                },
                             });
                             await recursive(ctx, () => Promise.resolve());
                         });
@@ -900,7 +910,9 @@ describe("createConversation", () => {
         const write = (_ctx: Context, data: ConversationData) => {
             state = data;
         };
-        const plugin = conversations({ read, write, delete: () => {} });
+        const plugin = conversations({
+            storage: { read, write, delete: () => {} },
+        });
         let p = 0;
         let q = 0;
         let r = 0;
@@ -944,7 +956,9 @@ describe("createConversation", () => {
         const write = (_ctx: Context, data: ConversationData) => {
             state = data;
         };
-        const plugin = conversations({ read, write, delete: () => {} });
+        const plugin = conversations({
+            storage: { read, write, delete: () => {} },
+        });
         let i = 0;
         let j = 0;
         const err = new Error("come at me bro");
@@ -969,7 +983,9 @@ describe("createConversation", () => {
         const write = (_ctx: Context, data: ConversationData) => {
             state = data;
         };
-        const plugin = conversations({ read, write, delete: () => {} });
+        const plugin = conversations({
+            storage: { read, write, delete: () => {} },
+        });
         let i = 0;
         let j = 0;
         const convo = createConversation(async (c) => {
@@ -999,7 +1015,9 @@ describe("createConversation", () => {
         const write = (_ctx: Context, data: ConversationData) => {
             state = data;
         };
-        const plugin = conversations({ read, write, delete: () => {} });
+        const plugin = conversations({
+            storage: { read, write, delete: () => {} },
+        });
         let i = 0;
         let j = 0;
         let k = 0;
@@ -1025,7 +1043,9 @@ describe("createConversation", () => {
         const write = (_ctx: Context, data: ConversationData) => {
             state = data;
         };
-        const plugin = conversations({ read, write, delete: () => {} });
+        const plugin = conversations({
+            storage: { read, write, delete: () => {} },
+        });
         let i = 0;
         let j = 0;
         let k = 0;

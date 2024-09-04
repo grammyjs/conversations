@@ -23,11 +23,13 @@ export interface ContextBaseData {
 
 type MaybePromise<T> = T | Promise<T>;
 export interface ConversationOptions<C extends Context> {
-    read(ctx: C): MaybePromise<ConversationData | undefined>;
-    write(ctx: C, state: ConversationData): void | Promise<void>;
-    delete(ctx: C): void | Promise<void>;
-    onEnter?(id: string): unknown | Promise<unknown>;
-    onExit?(id: string): unknown | Promise<unknown>;
+    storage: {
+        read(ctx: C): MaybePromise<ConversationData | undefined>;
+        write(ctx: C, state: ConversationData): MaybePromise<void>;
+        delete(ctx: C): MaybePromise<void>;
+    };
+    onEnter?(id: string): MaybePromise<unknown>;
+    onExit?(id: string): MaybePromise<unknown>;
 }
 export interface ConversationData {
     [id: string]: ConversationState[];
@@ -156,7 +158,7 @@ export function conversations<C extends Context>(
         }
 
         let read = false;
-        const res = await options.read(ctx);
+        const res = await options.storage.read(ctx);
         if (res === undefined) {
             await next();
             return;
@@ -224,9 +226,9 @@ export function conversations<C extends Context>(
                 }
             }
             if (len !== del) { // len - del > 0
-                await options.write(ctx, state);
+                await options.storage.write(ctx, state);
             } else if (!empty) {
-                await options.delete(ctx);
+                await options.storage.delete(ctx);
             }
         }
     };
