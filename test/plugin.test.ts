@@ -79,7 +79,10 @@ describe("conversations", () => {
         const mw = new Composer<TestContext>();
         mw.use(
             conversations({
-                storage: { getStorageKey, read, write, delete: del },
+                storage: {
+                    getStorageKey,
+                    adapter: { read, write, delete: del },
+                },
             }),
             createConversation(() => {}, "convo"),
         );
@@ -141,7 +144,10 @@ describe("conversations", () => {
         const mw = new Composer<TestContext>();
         mw.use(
             conversations({
-                storage: { getStorageKey, read, write, delete: del },
+                storage: {
+                    getStorageKey,
+                    adapter: { read, write, delete: del },
+                },
             }),
             createConversation(() => {}, "convo"),
         );

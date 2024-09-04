@@ -26,15 +26,23 @@ export type ConversionStorage<C extends Context> =
     | ConversationContextStorage<C>
     | ConversationKeyStorage<C>;
 export interface ConversationContextStorage<C extends Context> {
+    adapter?: never;
+
     read(ctx: C): MaybePromise<ConversationData | undefined>;
     write(ctx: C, state: ConversationData): MaybePromise<void>;
     delete(ctx: C): MaybePromise<void>;
 }
 export interface ConversationKeyStorage<C extends Context> {
     getStorageKey(ctx: C): string;
-    read(key: string): MaybePromise<ConversationData | undefined>;
-    write(key: string, state: ConversationData): MaybePromise<void>;
-    delete(key: string): MaybePromise<void>;
+    adapter: {
+        read(key: string): MaybePromise<ConversationData | undefined>;
+        write(key: string, state: ConversationData): MaybePromise<void>;
+        delete(key: string): MaybePromise<void>;
+    };
+
+    read?: never;
+    write?: never;
+    delete?: never;
 }
 export interface ConversationOptions<C extends Context> {
     storage: ConversionStorage<C>;
@@ -46,9 +54,10 @@ function uniformStorage<C extends Context>(storage: ConversionStorage<C>) {
         return (ctx: C) => {
             const key = storage.getStorageKey(ctx);
             return {
-                read: () => storage.read(key),
-                write: (state: ConversationData) => storage.write(key, state),
-                delete: () => storage.delete(key),
+                read: () => storage.adapter.read(key),
+                write: (state: ConversationData) =>
+                    storage.adapter.write(key, state),
+                delete: () => storage.adapter.delete(key),
             };
         };
     } else {
