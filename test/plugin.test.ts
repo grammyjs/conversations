@@ -86,7 +86,7 @@ describe("conversations", () => {
             Promise.resolve(mw.middleware()(mkctx(), next))
         );
     });
-    it("delete empty data", async () => {
+    it("should delete empty data", async () => {
         const ctx = mkctx();
         const read = spy((): ConversationData => ({ convo: [] }));
         const write = spy(() => {});
@@ -330,7 +330,7 @@ describe("createConversation", () => {
             assertEquals(write.calls[0].args[1].other.length, 1); // one active
             assertSpyCalls(del, 0);
         });
-        it("should support conversations that completely immediately after being entered", async () => {
+        it("should support conversations that complete immediately after being entered", async () => {
             const ctx = mkctx();
             const read = spy((): ConversationData => ({}));
             const write = spy(() => {});
