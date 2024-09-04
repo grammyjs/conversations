@@ -22,14 +22,44 @@ export interface ContextBaseData {
 }
 
 type MaybePromise<T> = T | Promise<T>;
+export type ConversionStorage<C extends Context> =
+    | ConversationContextStorage<C>
+    | ConversationKeyStorage<C>;
+export interface ConversationContextStorage<C extends Context> {
+    read(ctx: C): MaybePromise<ConversationData | undefined>;
+    write(ctx: C, state: ConversationData): MaybePromise<void>;
+    delete(ctx: C): MaybePromise<void>;
+}
+export interface ConversationKeyStorage<C extends Context> {
+    getStorageKey(ctx: C): string;
+    read(key: string): MaybePromise<ConversationData | undefined>;
+    write(key: string, state: ConversationData): MaybePromise<void>;
+    delete(key: string): MaybePromise<void>;
+}
 export interface ConversationOptions<C extends Context> {
-    storage: {
-        read(ctx: C): MaybePromise<ConversationData | undefined>;
-        write(ctx: C, state: ConversationData): MaybePromise<void>;
-        delete(ctx: C): MaybePromise<void>;
-    };
+    storage: ConversionStorage<C>;
     onEnter?(id: string): MaybePromise<unknown>;
     onExit?(id: string): MaybePromise<unknown>;
+}
+function uniformStorage<C extends Context>(storage: ConversionStorage<C>) {
+    if ("getStorageKey" in storage) {
+        return (ctx: C) => {
+            const key = storage.getStorageKey(ctx);
+            return {
+                read: () => storage.read(key),
+                write: (state: ConversationData) => storage.write(key, state),
+                delete: () => storage.delete(key),
+            };
+        };
+    } else {
+        return (ctx: C) => {
+            return {
+                read: () => storage.read(ctx),
+                write: (state: ConversationData) => storage.write(ctx, state),
+                delete: () => storage.delete(ctx),
+            };
+        };
+    }
 }
 export interface ConversationData {
     [id: string]: ConversationState[];
@@ -147,6 +177,7 @@ to use `await`?",
 export function conversations<C extends Context>(
     options: ConversationOptions<C>,
 ): MiddlewareFn<ConversationContext<C>> {
+    const createStorage = uniformStorage(options.storage);
     return async (ctx, next) => {
         if (internalRecursionDetection in ctx) {
             throw new Error(
@@ -157,8 +188,9 @@ export function conversations<C extends Context>(
             throw new Error("Cannot install conversations plugin twice!");
         }
 
+        const storage = createStorage(ctx);
         let read = false;
-        const res = await options.storage.read(ctx);
+        const res = await storage.read();
         if (res === undefined) {
             await next();
             return;
@@ -226,9 +258,9 @@ export function conversations<C extends Context>(
                 }
             }
             if (len !== del) { // len - del > 0
-                await options.storage.write(ctx, state);
+                await storage.write(state);
             } else if (!empty) {
-                await options.storage.delete(ctx);
+                await storage.delete();
             }
         }
     };
