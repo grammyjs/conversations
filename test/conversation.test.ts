@@ -344,7 +344,7 @@ describe("Conversation", () => {
             { text: "done" },
         ]);
     });
-    it("should wait for async waterfalls after skip calls for actions", async () => {
+    it("should wait for async action waterfalls after skip calls", async () => {
         const end = resolver();
         let i = 0;
         let j = 0;
@@ -513,6 +513,42 @@ describe("Conversation", () => {
         assertEquals(result.status, "complete");
         assertEquals(i, 1);
     });
-
-    // TODO: common cases such as loops with side-effects
+    it("should support loops and functions and more", async () => {
+        let j = 0;
+        async function convo(conversation: Convo, ctx: Context) {
+            let sum = 0;
+            assertEquals(ctx.update, 42 as unknown as Update);
+            async function waitN(limit: number) {
+                for (let i = 0; i < limit; i++) {
+                    sum += i;
+                    ctx = await conversation.wait();
+                    assertEquals(ctx.update, i as unknown as Update);
+                    await waitN(i);
+                }
+            }
+            await waitN(4);
+            assertEquals(sum, 11);
+            j++;
+        }
+        const first = await enterConversation(convo, mkctx(42));
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const args = first.args;
+        let state = {
+            args,
+            replay: first.replay,
+            interrupts: first.interrupts,
+        };
+        for (const i of [0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1]) {
+            const res = await resumeConversation(convo, mkctx(i), state);
+            if (res.status !== "handled") console.log(res);
+            assertEquals(res.status, "handled");
+            assert(res.status === "handled");
+            state = { args, ...res };
+        }
+        const res = await resumeConversation(convo, mkctx(0), state);
+        assertEquals(res.status, "complete");
+        assert(res.status === "complete");
+        assertEquals(j, 1);
+    });
 });
