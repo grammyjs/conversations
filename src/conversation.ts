@@ -23,6 +23,7 @@ export class Conversation<C extends Context = Context> {
         private hydrate: (update: Update) => C,
         private middleware: MiddlewareFn<C>,
     ) {}
+    // TODO: add forms
     async wait(): Promise<C> {
         if (this.insideExternal) {
             throw new Error(

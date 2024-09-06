@@ -54,6 +54,7 @@ export interface ConversationKeyStorage<C extends Context> {
     delete?: never;
 }
 export interface ConversationOptions<OC extends Context, C extends Context> {
+    // TODO: make storage optional
     storage: ConversationStorage<OC>;
     plugins?: Middleware<C>[];
     onEnter?(id: string): MaybePromise<unknown>;
