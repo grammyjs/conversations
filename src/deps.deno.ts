@@ -1,5 +1,6 @@
 export {
     Api,
+    type ApiClientOptions,
     Composer,
     Context,
     GrammyError,

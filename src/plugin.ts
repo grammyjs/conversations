@@ -1,6 +1,7 @@
 import { Conversation } from "./conversation.ts";
 import {
     Api,
+    type ApiClientOptions,
     Context,
     HttpError,
     type MiddlewareFn,
@@ -17,8 +18,12 @@ const internalCompletenessMarker = Symbol("conversations.completeness");
 
 export interface ContextBaseData {
     update: Update;
-    api: Api;
+    api: ApiBaseData;
     me: UserFromGetMe;
+}
+export interface ApiBaseData {
+    token: string;
+    options?: ApiClientOptions;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -229,7 +234,7 @@ export function conversations<C extends Context>(
                 api: ctx.api,
                 me: ctx.me,
             };
-            return await enterConversation(builder, base, ...args);
+            return await enterConversation(builder, base, { args, ctx });
         }
         const exit = options.onExit !== undefined
             ? async (id: string) => {
@@ -341,9 +346,9 @@ export function createConversation<C extends Context>(
         };
         const result = await runParallelConversations(
             builder,
+            base,
             id,
             mutableData, // will be mutated on ctx
-            base,
         );
         switch (result.status) {
             case "error":
@@ -356,15 +361,17 @@ export function createConversation<C extends Context>(
 
 export async function runParallelConversations<C extends Context>(
     builder: ConversationBuilder<C>,
+    base: ContextBaseData,
     id: string,
     data: ConversationData,
-    base: ContextBaseData,
+    options?: ResumeOptions<C>,
 ): Promise<ConversationResult> {
     if (!(id in data)) return { status: "skipped" };
     const states = data[id];
     const len = states.length;
     for (let i = 0; i < len; i++) {
-        const result = await resumeConversation(builder, base, states[i]);
+        const state = states[i];
+        const result = await resumeConversation(builder, base, state, options);
         switch (result.status) {
             case "skipped":
                 continue;
@@ -398,12 +405,17 @@ export interface EnterSkipped extends ConversationSkipped {
     interrupts: number[];
 }
 
+export interface EnterOptions<C extends Context> {
+    // deno-lint-ignore no-explicit-any
+    args?: any[];
+    ctx?: C;
+}
 export async function enterConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
     base: ContextBaseData,
-    // deno-lint-ignore no-explicit-any
-    ...args: any[]
+    options?: EnterOptions<C>,
 ): Promise<EnterResult> {
+    const { args = [], ctx } = options ?? {};
     const packedArgs = JSON.stringify(args);
     const [initialState, int] = ReplayEngine.open();
     const state: ConversationState = {
@@ -411,7 +423,7 @@ export async function enterConversation<C extends Context>(
         replay: initialState,
         interrupts: [int],
     };
-    const result = await resumeConversation(conversation, base, state);
+    const result = await resumeConversation(conversation, base, state, { ctx });
     switch (result.status) {
         case "complete":
         case "error":
@@ -428,15 +440,25 @@ export async function enterConversation<C extends Context>(
     }
 }
 
+export interface ResumeOptions<C extends Context> {
+    ctx?: C;
+}
 export async function resumeConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
-    { update, api, me }: ContextBaseData,
+    base: ContextBaseData,
     state: ConversationState,
+    options?: ResumeOptions<C>,
 ): Promise<ConversationResult> {
+    const { update, api, me } = base;
     const args = JSON.parse(state.args);
+    const outsideContext: C = options?.ctx ?? youTouchYouDie(
+        "The conversation was advanced from an event so there is no access to an outside context object",
+    );
+    // deno-lint-ignore no-explicit-any
+    const escape = (fn: (ctx: C) => any) => fn(outsideContext);
     const engine = new ReplayEngine(async (controls) => {
         const hydrate = hydrateContext<C>(controls, api, me);
-        const convo = new Conversation(controls, hydrate);
+        const convo = new Conversation(controls, escape, hydrate);
         const ctx = await convo.wait();
         await conversation(convo, ctx, ...args);
     });
@@ -483,7 +505,7 @@ export async function resumeConversation<C extends Context>(
 
 function hydrateContext<C extends Context>(
     controls: ReplayControls,
-    protoApi: Api,
+    protoApi: ApiBaseData,
     me: UserFromGetMe,
 ) {
     return (update: Update) => {
@@ -517,7 +539,7 @@ function hydrateContext<C extends Context>(
             } else {
                 throw new HttpError(
                     "Error inside conversation: " + ret.err.message,
-                    new Error(ret.err.error),
+                    new Error(JSON.parse(ret.err.error)),
                 );
             }
         });
@@ -525,4 +547,25 @@ function hydrateContext<C extends Context>(
         Object.defineProperty(ctx, internalRecursionDetection, { value: true });
         return ctx;
     };
+}
+
+function youTouchYouDie<C extends Context>(message: string) {
+    function nope(): never {
+        throw new Error(message);
+    }
+    return new Proxy({} as C, {
+        apply: nope,
+        construct: nope,
+        defineProperty: nope,
+        deleteProperty: nope,
+        get: nope,
+        getOwnPropertyDescriptor: nope,
+        getPrototypeOf: nope,
+        has: nope,
+        isExtensible: nope,
+        ownKeys: nope,
+        preventExtensions: nope,
+        set: nope,
+        setPrototypeOf: nope,
+    });
 }

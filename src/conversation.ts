@@ -1,21 +1,30 @@
 import { type Context, type Update } from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
 
-// deno-lint-ignore no-explicit-any
-export interface ExternalOp<F extends (...args: any[]) => any, I = any> {
+export interface ExternalOp<
+    C extends Context,
+    // deno-lint-ignore no-explicit-any
+    F extends (ctx: C) => any,
+    // deno-lint-ignore no-explicit-any
+    I = any,
+> {
     task: F;
-    args?: Parameters<F>;
     beforeStore?: (value: Awaited<ReturnType<F>>) => I | Promise<I>;
     afterLoad?: (value: I) => ReturnType<F> | Promise<ReturnType<F>>;
     beforeStoreError?: (value: unknown) => unknown | Promise<unknown>;
-    afterLoadError?: (value: unknown) => unknown;
+    afterLoadError?: (value: unknown) => unknown | Promise<unknown>;
 }
+// deno-lint-ignore no-explicit-any
+type ApplyContext<C extends Context> = <F extends (ctx: C) => any>(
+    fn: F,
+) => Promise<ReturnType<F>>;
 
 export class Conversation<C extends Context> {
     /** true if external is currently running, false otherwise */
     private insideExternal = false;
     constructor(
         private controls: ReplayControls,
+        private escape: ApplyContext<C>,
         private hydrate: (update: Update) => C,
     ) {}
     async wait(): Promise<C> {
@@ -35,9 +44,9 @@ First return your data from `external` and then resume update handling using `wa
         return await this.controls.cancel("halt");
     }
     // deno-lint-ignore no-explicit-any
-    async external<F extends (...args: any[]) => any, I = any>(
+    async external<F extends (ctx: C) => any, I = any>(
         // deno-lint-ignore no-explicit-any
-        op: (() => any) | ExternalOp<F, I>,
+        op: ((ctx: C) => any) | ExternalOp<C, F, I>,
     ): Promise<Awaited<ReturnType<F>>> {
         // Make sure that no other ops are performed concurrently (or from
         // within the handler) because they will not be performed during a
@@ -56,7 +65,6 @@ First return your data from `external` and then resume update handling using `wa
             task,
             afterLoad = (x: I) => x as ReturnType<F>,
             afterLoadError = (e: unknown) => e,
-            args = [],
             beforeStore = (x: ReturnType<F>) => x as I,
             beforeStoreError = (e: unknown) => e,
         } = typeof op === "function" ? { task: op as F } : op;
@@ -64,7 +72,7 @@ First return your data from `external` and then resume update handling using `wa
         const action = async () => {
             this.insideExternal = true;
             try {
-                const ret = await task(...args);
+                const ret = await this.escape(task);
                 return { ok: true, ret: await beforeStore(ret) } as const;
             } catch (e) {
                 return { ok: false, err: await beforeStoreError(e) } as const;

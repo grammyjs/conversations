@@ -1133,7 +1133,9 @@ describe("enterConversation and resumeConversation", () => {
             assertStrictEquals(ctx.update, expected.update);
             i++;
         };
-        const first = await enterConversation(convo, mkctx(), "input");
+        const first = await enterConversation(convo, mkctx(), {
+            args: ["input"],
+        });
         assertEquals(first.status, "handled");
         assert(first.status === "handled");
         const second = await resumeConversation(convo, expected, first);

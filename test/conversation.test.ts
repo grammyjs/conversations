@@ -14,6 +14,8 @@ import {
     assertInstanceOf,
     assertNotStrictEquals,
     assertRejects,
+    assertStrictEquals,
+    assertThrows,
     describe,
     it,
     stub,
@@ -154,13 +156,77 @@ describe("Conversation", () => {
         assert(second.status === "complete");
         assertEquals(i, 1);
     });
+    it("should support outside context objects in external", async () => {
+        const ctx = mkctx(Math.random());
+        let i = 0;
+        let rnd = 0;
+        async function convo(conversation: Convo) {
+            const x = await conversation.external((outsideContext) => {
+                assertStrictEquals(ctx, outsideContext);
+                return ctx.update;
+            });
+            rnd = x;
+            await conversation.wait();
+            assertEquals(rnd, x);
+            i++;
+        }
+        const first = await enterConversation(convo, ctx, { ctx });
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, ctx, copy, { ctx });
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(ctx.update as unknown, rnd);
+        assertEquals(i, 1);
+    });
+    it("should support throw an error when outside context objects are used in external after advancing from an event", async () => {
+        const ctx = mkctx(Math.random());
+        let i = 0;
+        let rnd = 0;
+        async function convo(conversation: Convo) {
+            const x = await conversation.external((outsideContext) => {
+                // deno-lint-ignore no-explicit-any
+                const nope = outsideContext as any;
+                assertThrows(() => nope());
+                assertThrows(() => new nope());
+                assertThrows(() =>
+                    Object.defineProperty(nope, "key", { value: true })
+                );
+                assertThrows(() => delete nope.prop);
+                assertThrows(() => nope.prop);
+                assertThrows(() =>
+                    Object.getOwnPropertyDescriptor(nope, "key")
+                );
+                assertThrows(() => Object.getPrototypeOf(nope));
+                assertThrows(() => "key" in nope);
+                assertThrows(() => Object.isExtensible(nope));
+                assertThrows(() => Reflect.ownKeys(nope));
+                assertThrows(() => nope.prop = true);
+                assertThrows(() => Object.setPrototypeOf(nope, null));
+                return ctx.update;
+            });
+            rnd = x;
+            await conversation.wait();
+            assertEquals(rnd, x);
+            i++;
+        }
+        const first = await enterConversation(convo, ctx, {});
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, ctx, copy, {});
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(ctx.update as unknown, rnd);
+        assertEquals(i, 1);
+    });
     it("should support external with custom serialisation formats", async () => {
         const ctx = mkctx();
         let i = 0;
         async function convo(conversation: Convo) {
             const x = await conversation.external({
-                task: (key: string) => new Map([[key, Math.random()]]),
-                args: ["rnd"],
+                task: () => new Map([["rnd", Math.random()]]),
                 beforeStore: (map) => Array.from(map.entries()),
                 afterLoad: (entries) => new Map(entries),
             });
