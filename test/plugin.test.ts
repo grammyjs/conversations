@@ -201,6 +201,48 @@ describe("createConversation", () => {
         mw.use(createConversation(() => {}, "convo"));
         await assertRejects(() => Promise.resolve(mw.middleware()(ctx, next)));
     });
+    it("should support plugins", async () => {
+        const mw = new Composer<TestContext>();
+        let i = 0;
+
+        let state: ConversationData = {};
+        const read = (_ctx: Context) => state;
+        const write = (_ctx: Context, data: ConversationData) => {
+            state = data;
+        };
+        type PluginContext = TestContext & {
+            phi: number;
+            prop: number;
+        };
+        mw.use(
+            conversations({
+                storage: { read, write, delete: () => {} },
+                plugins: [async (ctx, next) => {
+                    Object.assign(ctx, { phi: 0.5 * (1 + Math.sqrt(5)) });
+                    await next();
+                }],
+            }),
+            createConversation(async (convo, ctx: PluginContext) => {
+                assertEquals(ctx.prop, 42);
+                ctx = await convo.wait();
+                assertEquals(ctx.prop, 42);
+                assertEquals(Math.round(ctx.phi), 2);
+                i++;
+            }, {
+                id: "convo",
+                plugins: [async (ctx, next) => {
+                    Object.assign(ctx, { prop: 0 });
+                    await next();
+                }, (ctx) => {
+                    Object.assign(ctx, { prop: 42 });
+                }],
+            }),
+            (ctx) => ctx.conversation.enter("convo"),
+        );
+        await mw.middleware()(mkctx(), next);
+        await mw.middleware()(mkctx(), next);
+        assertEquals(i, 1);
+    });
     describe("via ctx.conversation", () => {
         it("should support entering conversations", async () => {
             const ctx = mkctx();

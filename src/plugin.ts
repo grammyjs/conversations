@@ -2,8 +2,10 @@ import { Conversation } from "./conversation.ts";
 import {
     Api,
     type ApiClientOptions,
+    Composer,
     Context,
     HttpError,
+    type Middleware,
     type MiddlewareFn,
     type Update,
     type UserFromGetMe,
@@ -14,6 +16,7 @@ import { type ReplayState } from "./state.ts";
 const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
+const internalDefaultPlugins = Symbol("conversations.plugins");
 const internalCompletenessMarker = Symbol("conversations.completeness");
 
 export interface ContextBaseData {
@@ -27,7 +30,7 @@ export interface ApiBaseData {
 }
 
 type MaybePromise<T> = T | Promise<T>;
-export type ConversionStorage<C extends Context> =
+export type ConversationStorage<C extends Context> =
     | ConversationContextStorage<C>
     | ConversationKeyStorage<C>;
 export interface ConversationContextStorage<C extends Context> {
@@ -50,11 +53,12 @@ export interface ConversationKeyStorage<C extends Context> {
     delete?: never;
 }
 export interface ConversationOptions<C extends Context> {
-    storage: ConversionStorage<C>;
+    storage: ConversationStorage<C>;
+    plugins?: Middleware<C>[];
     onEnter?(id: string): MaybePromise<unknown>;
     onExit?(id: string): MaybePromise<unknown>;
 }
-function uniformStorage<C extends Context>(storage: ConversionStorage<C>) {
+function uniformStorage<C extends Context>(storage: ConversationStorage<C>) {
     if ("getStorageKey" in storage) {
         return (ctx: C) => {
             const key = storage.getStorageKey(ctx);
@@ -78,7 +82,14 @@ function uniformStorage<C extends Context>(storage: ConversionStorage<C>) {
 export interface ConversationData {
     [id: string]: ConversationState[];
 }
-type ConversationIndex<C extends Context> = Map<string, ConversationBuilder<C>>;
+type ConversationIndex<C extends Context> = Map<
+    string,
+    ConversationIndexEntry<C>
+>;
+interface ConversationIndexEntry<C extends Context> {
+    builder: ConversationBuilder<C>;
+    plugins: Middleware<C>[];
+}
 export type ConversationContext<C extends Context> = C & {
     conversation: ConversationControls;
 };
@@ -219,8 +230,8 @@ export function conversations<C extends Context>(
         const index: ConversationIndex<C> = new Map();
         // deno-lint-ignore no-explicit-any
         async function enter(id: string, ...args: any[]) {
-            const builder = index.get(id);
-            if (builder === undefined) {
+            const entry = index.get(id);
+            if (entry === undefined) {
                 const known = Array.from(index.keys())
                     .map((id) => `'${id}'`)
                     .join(", ");
@@ -228,13 +239,15 @@ export function conversations<C extends Context>(
                     `The conversation '${id}' has not been registered! Known conversations are: ${known}`,
                 );
             }
+            const { builder, plugins } = entry;
             await options.onEnter?.(id);
             const base: ContextBaseData = {
                 update: ctx.update,
                 api: ctx.api,
                 me: ctx.me,
             };
-            return await enterConversation(builder, base, { args, ctx });
+            const opts = { args, ctx, plugins };
+            return await enterConversation(builder, base, opts);
         }
         const exit = options.onExit !== undefined
             ? async (id: string) => {
@@ -248,6 +261,9 @@ export function conversations<C extends Context>(
 
         Object.defineProperty(ctx, internalMutableState, { get: getData });
         Object.defineProperty(ctx, internalIndex, { value: index });
+        Object.defineProperty(ctx, internalDefaultPlugins, {
+            value: options.plugins ?? [],
+        });
         Object.defineProperty(ctx, "conversation", {
             value: controls(getData, canSave, enter, exit),
         });
@@ -312,21 +328,29 @@ export type ConversationBuilder<C extends Context> = (
     // deno-lint-ignore no-explicit-any
     ...args: any[]
 ) => void | Promise<void>;
-// TODO: add wait timeouts
-// export interface ConversationConfig {
-//     id?: string;
-//     maxMillisecondsToWait?: number;
-// }
+export interface ConversationConfig<C extends Context> {
+    id?: string;
+    plugins?: Middleware<C>[];
+    // TODO: add wait timeouts
+    // maxMillisecondsToWait?: number;
+}
 
-export function createConversation<C extends Context>(
+export function createConversation<OC extends Context, C extends Context>(
     builder: ConversationBuilder<C>,
-    id: string = builder.name,
-): MiddlewareFn<ConversationContext<C>> {
+    options?: string | ConversationConfig<C>,
+): MiddlewareFn<ConversationContext<OC>> {
+    const { id = builder.name, plugins = [] } = typeof options === "string"
+        ? { id: options }
+        : options ?? {};
     if (!id) {
         throw new Error("Cannot register a conversation without a name!");
     }
     return async (ctx, next) => {
-        if (!(internalMutableState in ctx) || !(internalIndex in ctx)) {
+        if (
+            !(internalMutableState in ctx) ||
+            !(internalIndex in ctx) ||
+            !(internalDefaultPlugins in ctx)
+        ) {
             throw new Error(
                 "Cannot register a conversation without installing the conversations plugin first!",
             );
@@ -336,7 +360,9 @@ export function createConversation<C extends Context>(
         if (index.has(id)) {
             throw new Error(`Duplicate conversation identifier '${id}'!`);
         }
-        index.set(id, builder);
+        const defaultPlugins = ctx[internalDefaultPlugins] as Middleware<C>[];
+        const combinedPlugins = [...defaultPlugins, ...plugins];
+        index.set(id, { builder, plugins: combinedPlugins });
 
         const mutableData = ctx[internalMutableState] as ConversationData;
         const base: ContextBaseData = {
@@ -349,6 +375,7 @@ export function createConversation<C extends Context>(
             base,
             id,
             mutableData, // will be mutated on ctx
+            { ctx, plugins: combinedPlugins },
         );
         switch (result.status) {
             case "error":
@@ -405,17 +432,16 @@ export interface EnterSkipped extends ConversationSkipped {
     interrupts: number[];
 }
 
-export interface EnterOptions<C extends Context> {
+export interface EnterOptions<C extends Context> extends ResumeOptions<C> {
     // deno-lint-ignore no-explicit-any
     args?: any[];
-    ctx?: C;
 }
 export async function enterConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
     base: ContextBaseData,
     options?: EnterOptions<C>,
 ): Promise<EnterResult> {
-    const { args = [], ctx } = options ?? {};
+    const { args = [], ...opts } = options ?? {};
     const packedArgs = JSON.stringify(args);
     const [initialState, int] = ReplayEngine.open();
     const state: ConversationState = {
@@ -423,7 +449,7 @@ export async function enterConversation<C extends Context>(
         replay: initialState,
         interrupts: [int],
     };
-    const result = await resumeConversation(conversation, base, state, { ctx });
+    const result = await resumeConversation(conversation, base, state, opts);
     switch (result.status) {
         case "complete":
         case "error":
@@ -441,7 +467,8 @@ export async function enterConversation<C extends Context>(
 }
 
 export interface ResumeOptions<C extends Context> {
-    ctx?: C;
+    ctx?: Context;
+    plugins?: Middleware<C>[];
 }
 export async function resumeConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
@@ -451,13 +478,12 @@ export async function resumeConversation<C extends Context>(
 ): Promise<ConversationResult> {
     const { update, api, me } = base;
     const args = JSON.parse(state.args);
-    const outsideContext: C = options?.ctx ?? youTouchYouDie(
-        "The conversation was advanced from an event so there is no access to an outside context object",
-    );
+    const { ctx = youTouchYouDie, plugins = [] } = options ?? {};
+    const middleware = new Composer(...plugins).middleware();
     // deno-lint-ignore no-explicit-any
-    const escape = (fn: (ctx: C) => any) => fn(outsideContext);
+    const escape = (fn: (ctx: Context) => any) => fn(ctx);
     const engine = new ReplayEngine(async (controls) => {
-        const hydrate = hydrateContext<C>(controls, api, me);
+        const hydrate = hydrateContext(controls, api, me, middleware);
         const convo = new Conversation(controls, escape, hydrate);
         const ctx = await convo.wait();
         await conversation(convo, ctx, ...args);
@@ -507,8 +533,9 @@ function hydrateContext<C extends Context>(
     controls: ReplayControls,
     protoApi: ApiBaseData,
     me: UserFromGetMe,
+    middleware: MiddlewareFn<C>,
 ) {
-    return (update: Update) => {
+    return async (update: Update) => {
         const api = new Api(protoApi.token, protoApi.options);
         api.config.use(async (prev, method, payload, signal) => {
             // Prepare values before storing them
@@ -545,27 +572,28 @@ function hydrateContext<C extends Context>(
         });
         const ctx = new Context(update, api, me) as C;
         Object.defineProperty(ctx, internalRecursionDetection, { value: true });
+        await middleware(ctx, () => Promise.resolve());
         return ctx;
     };
 }
 
-function youTouchYouDie<C extends Context>(message: string) {
-    function nope(): never {
-        throw new Error(message);
-    }
-    return new Proxy({} as C, {
-        apply: nope,
-        construct: nope,
-        defineProperty: nope,
-        deleteProperty: nope,
-        get: nope,
-        getOwnPropertyDescriptor: nope,
-        getPrototypeOf: nope,
-        has: nope,
-        isExtensible: nope,
-        ownKeys: nope,
-        preventExtensions: nope,
-        set: nope,
-        setPrototypeOf: nope,
-    });
+function nope(): never {
+    throw new Error(
+        "The conversation was advanced from an event so there is no access to an outside context object",
+    );
 }
+const youTouchYouDie = new Proxy({} as Context, {
+    apply: nope,
+    construct: nope,
+    defineProperty: nope,
+    deleteProperty: nope,
+    get: nope,
+    getOwnPropertyDescriptor: nope,
+    getPrototypeOf: nope,
+    has: nope,
+    isExtensible: nope,
+    ownKeys: nope,
+    preventExtensions: nope,
+    set: nope,
+    setPrototypeOf: nope,
+});

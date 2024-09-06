@@ -157,13 +157,13 @@ describe("Conversation", () => {
         assertEquals(i, 1);
     });
     it("should support outside context objects in external", async () => {
-        const ctx = mkctx(Math.random());
+        const ctx = mkctx({ update_id: Math.random() });
         let i = 0;
         let rnd = 0;
         async function convo(conversation: Convo) {
             const x = await conversation.external((outsideContext) => {
                 assertStrictEquals(ctx, outsideContext);
-                return ctx.update;
+                return ctx.update.update_id;
             });
             rnd = x;
             await conversation.wait();
@@ -177,11 +177,11 @@ describe("Conversation", () => {
         const second = await resumeConversation(convo, ctx, copy, { ctx });
         assertEquals(second.status, "complete");
         assert(second.status === "complete");
-        assertEquals(ctx.update as unknown, rnd);
+        assertEquals(ctx.update, { update_id: rnd });
         assertEquals(i, 1);
     });
     it("should support throw an error when outside context objects are used in external after advancing from an event", async () => {
-        const ctx = mkctx(Math.random());
+        const ctx = mkctx({ update_id: Math.random() });
         let i = 0;
         let rnd = 0;
         async function convo(conversation: Convo) {
@@ -204,7 +204,7 @@ describe("Conversation", () => {
                 assertThrows(() => Reflect.ownKeys(nope));
                 assertThrows(() => nope.prop = true);
                 assertThrows(() => Object.setPrototypeOf(nope, null));
-                return ctx.update;
+                return ctx.update.update_id;
             });
             rnd = x;
             await conversation.wait();
@@ -218,7 +218,7 @@ describe("Conversation", () => {
         const second = await resumeConversation(convo, ctx, copy, {});
         assertEquals(second.status, "complete");
         assert(second.status === "complete");
-        assertEquals(ctx.update as unknown, rnd);
+        assertEquals(ctx.update, { update_id: rnd });
         assertEquals(i, 1);
     });
     it("should support external with custom serialisation formats", async () => {

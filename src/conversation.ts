@@ -1,13 +1,8 @@
 import { type Context, type Update } from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
 
-export interface ExternalOp<
-    C extends Context,
-    // deno-lint-ignore no-explicit-any
-    F extends (ctx: C) => any,
-    // deno-lint-ignore no-explicit-any
-    I = any,
-> {
+// deno-lint-ignore no-explicit-any
+export interface ExternalOp<F extends (ctx: Context) => any, I = any> {
     task: F;
     beforeStore?: (value: Awaited<ReturnType<F>>) => I | Promise<I>;
     afterLoad?: (value: I) => ReturnType<F> | Promise<ReturnType<F>>;
@@ -15,7 +10,7 @@ export interface ExternalOp<
     afterLoadError?: (value: unknown) => unknown | Promise<unknown>;
 }
 // deno-lint-ignore no-explicit-any
-type ApplyContext<C extends Context> = <F extends (ctx: C) => any>(
+type ApplyContext = <F extends (ctx: Context) => any>(
     fn: F,
 ) => Promise<ReturnType<F>>;
 
@@ -24,8 +19,8 @@ export class Conversation<C extends Context> {
     private insideExternal = false;
     constructor(
         private controls: ReplayControls,
-        private escape: ApplyContext<C>,
-        private hydrate: (update: Update) => C,
+        private escape: ApplyContext,
+        private hydrate: (update: Update) => Promise<C>,
     ) {}
     async wait(): Promise<C> {
         if (this.insideExternal) {
@@ -35,7 +30,8 @@ First return your data from `external` and then resume update handling using `wa
             );
         }
         const update = await this.controls.interrupt() as Update;
-        return this.hydrate(update);
+        const ctx = await this.hydrate(update);
+        return ctx;
     }
     async skip(): Promise<never> {
         return await this.controls.cancel("skip");
@@ -44,9 +40,8 @@ First return your data from `external` and then resume update handling using `wa
         return await this.controls.cancel("halt");
     }
     // deno-lint-ignore no-explicit-any
-    async external<F extends (ctx: C) => any, I = any>(
-        // deno-lint-ignore no-explicit-any
-        op: ((ctx: C) => any) | ExternalOp<C, F, I>,
+    async external<F extends (ctx: Context) => any, I = any>(
+        op: F | ExternalOp<F, I>,
     ): Promise<Awaited<ReturnType<F>>> {
         // Make sure that no other ops are performed concurrently (or from
         // within the handler) because they will not be performed during a
