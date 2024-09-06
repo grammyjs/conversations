@@ -1,4 +1,4 @@
-import { type Context, type Update } from "./deps.deno.ts";
+import { type Context, type MiddlewareFn, type Update } from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -14,13 +14,14 @@ type ApplyContext = <F extends (ctx: Context) => any>(
     fn: F,
 ) => Promise<ReturnType<F>>;
 
-export class Conversation<C extends Context> {
+export class Conversation<C extends Context = Context> {
     /** true if external is currently running, false otherwise */
     private insideExternal = false;
     constructor(
         private controls: ReplayControls,
         private escape: ApplyContext,
-        private hydrate: (update: Update) => Promise<C>,
+        private hydrate: (update: Update) => C,
+        private middleware: MiddlewareFn<C>,
     ) {}
     async wait(): Promise<C> {
         if (this.insideExternal) {
@@ -30,8 +31,13 @@ First return your data from `external` and then resume update handling using `wa
             );
         }
         const update = await this.controls.interrupt() as Update;
-        const ctx = await this.hydrate(update);
-        return ctx;
+        const ctx = this.hydrate(update);
+        let nextCalled = false;
+        await this.middleware(ctx, () => {
+            nextCalled = true;
+            return Promise.resolve();
+        });
+        return nextCalled ? ctx : await this.wait();
     }
     async skip(): Promise<never> {
         return await this.controls.cancel("skip");

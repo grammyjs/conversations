@@ -7,8 +7,8 @@ import {
 } from "../src/deps.deno.ts";
 import {
     type ConversationBuilder,
-    type ConversationContext,
     type ConversationData,
+    type ConversationFlavor,
     conversations,
     createConversation,
     enterConversation,
@@ -30,7 +30,7 @@ import {
     spy,
 } from "./deps.test.ts";
 
-type TestContext = ConversationContext<Context>;
+type TestContext = ConversationFlavor<Context>;
 function mkctx() {
     return new Context(
         {} as Update,
@@ -233,8 +233,9 @@ describe("createConversation", () => {
                 plugins: [async (ctx, next) => {
                     Object.assign(ctx, { prop: 0 });
                     await next();
-                }, (ctx) => {
+                }, async (ctx, next) => {
                     Object.assign(ctx, { prop: 42 });
+                    await next();
                 }],
             }),
             (ctx) => ctx.conversation.enter("convo"),
@@ -971,7 +972,7 @@ describe("createConversation", () => {
             mw.use(
                 conversations({ storage: { read, write, delete: del } }),
                 createConversation(
-                    async (_c, ctx: ConversationContext<Context>) => {
+                    async (_c, ctx: ConversationFlavor<Context>) => {
                         await assertRejects(async () => {
                             const recursive = conversations({
                                 storage: {

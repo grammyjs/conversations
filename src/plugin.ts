@@ -12,6 +12,7 @@ import {
 } from "./deps.deno.ts";
 import { type ReplayControls, ReplayEngine } from "./engine.ts";
 import { type ReplayState } from "./state.ts";
+export type { Conversation } from "./conversation.ts";
 
 const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
@@ -41,7 +42,7 @@ export interface ConversationContextStorage<C extends Context> {
     delete(ctx: C): MaybePromise<void>;
 }
 export interface ConversationKeyStorage<C extends Context> {
-    getStorageKey(ctx: C): string;
+    getStorageKey(ctx: C): string | undefined;
     adapter: {
         read(key: string): MaybePromise<ConversationData | undefined>;
         write(key: string, state: ConversationData): MaybePromise<void>;
@@ -52,8 +53,8 @@ export interface ConversationKeyStorage<C extends Context> {
     write?: never;
     delete?: never;
 }
-export interface ConversationOptions<C extends Context> {
-    storage: ConversationStorage<C>;
+export interface ConversationOptions<OC extends Context, C extends Context> {
+    storage: ConversationStorage<OC>;
     plugins?: Middleware<C>[];
     onEnter?(id: string): MaybePromise<unknown>;
     onExit?(id: string): MaybePromise<unknown>;
@@ -62,12 +63,18 @@ function uniformStorage<C extends Context>(storage: ConversationStorage<C>) {
     if ("getStorageKey" in storage) {
         return (ctx: C) => {
             const key = storage.getStorageKey(ctx);
-            return {
-                read: () => storage.adapter.read(key),
-                write: (state: ConversationData) =>
-                    storage.adapter.write(key, state),
-                delete: () => storage.adapter.delete(key),
-            };
+            return key === undefined
+                ? {
+                    read: () => undefined,
+                    write: () => undefined,
+                    delete: () => undefined,
+                }
+                : {
+                    read: () => storage.adapter.read(key),
+                    write: (state: ConversationData) =>
+                        storage.adapter.write(key, state),
+                    delete: () => storage.adapter.delete(key),
+                };
         };
     } else {
         return (ctx: C) => {
@@ -90,7 +97,7 @@ interface ConversationIndexEntry<C extends Context> {
     builder: ConversationBuilder<C>;
     plugins: Middleware<C>[];
 }
-export type ConversationContext<C extends Context> = C & {
+export type ConversationFlavor<C extends Context> = C & {
     conversation: ConversationControls;
 };
 export interface ConversationControls {
@@ -199,9 +206,9 @@ to use `await`?",
     };
 }
 
-export function conversations<C extends Context>(
-    options: ConversationOptions<C>,
-): MiddlewareFn<ConversationContext<C>> {
+export function conversations<OC extends Context, C extends Context>(
+    options: ConversationOptions<OC, C>,
+): MiddlewareFn<ConversationFlavor<OC>> {
     const createStorage = uniformStorage(options.storage);
     return async (ctx, next) => {
         if (internalRecursionDetection in ctx) {
@@ -215,12 +222,7 @@ export function conversations<C extends Context>(
 
         const storage = createStorage(ctx);
         let read = false;
-        const res = await storage.read();
-        if (res === undefined) {
-            await next();
-            return;
-        }
-        const state = res;
+        const state = await storage.read() ?? {};
         const empty = Object.keys(state).length === 0;
         function getData() {
             read = true;
@@ -338,7 +340,7 @@ export interface ConversationConfig<C extends Context> {
 export function createConversation<OC extends Context, C extends Context>(
     builder: ConversationBuilder<C>,
     options?: string | ConversationConfig<C>,
-): MiddlewareFn<ConversationContext<OC>> {
+): MiddlewareFn<ConversationFlavor<OC>> {
     const { id = builder.name, plugins = [] } = typeof options === "string"
         ? { id: options }
         : options ?? {};
@@ -483,8 +485,8 @@ export async function resumeConversation<C extends Context>(
     // deno-lint-ignore no-explicit-any
     const escape = (fn: (ctx: Context) => any) => fn(ctx);
     const engine = new ReplayEngine(async (controls) => {
-        const hydrate = hydrateContext(controls, api, me, middleware);
-        const convo = new Conversation(controls, escape, hydrate);
+        const hydrate = hydrateContext<C>(controls, api, me);
+        const convo = new Conversation(controls, escape, hydrate, middleware);
         const ctx = await convo.wait();
         await conversation(convo, ctx, ...args);
     });
@@ -533,9 +535,8 @@ function hydrateContext<C extends Context>(
     controls: ReplayControls,
     protoApi: ApiBaseData,
     me: UserFromGetMe,
-    middleware: MiddlewareFn<C>,
 ) {
-    return async (update: Update) => {
+    return (update: Update) => {
         const api = new Api(protoApi.token, protoApi.options);
         api.config.use(async (prev, method, payload, signal) => {
             // Prepare values before storing them
@@ -572,7 +573,6 @@ function hydrateContext<C extends Context>(
         });
         const ctx = new Context(update, api, me) as C;
         Object.defineProperty(ctx, internalRecursionDetection, { value: true });
-        await middleware(ctx, () => Promise.resolve());
         return ctx;
     };
 }
