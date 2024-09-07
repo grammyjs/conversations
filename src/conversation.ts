@@ -2,10 +2,10 @@ import { type Context, type MiddlewareFn, type Update } from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
 
 // deno-lint-ignore no-explicit-any
-export interface ExternalOp<F extends (ctx: Context) => any, I = any> {
-    task: F;
-    beforeStore?: (value: Awaited<ReturnType<F>>) => I | Promise<I>;
-    afterLoad?: (value: I) => ReturnType<F> | Promise<ReturnType<F>>;
+export interface ExternalOp<OC extends Context, R, I = any> {
+    task: (ctx: OC) => R | Promise<R>;
+    beforeStore?: (value: R) => I | Promise<I>;
+    afterLoad?: (value: I) => R | Promise<R>;
     beforeStoreError?: (value: unknown) => unknown | Promise<unknown>;
     afterLoadError?: (value: unknown) => unknown | Promise<unknown>;
 }
@@ -24,6 +24,7 @@ export class Conversation<C extends Context = Context> {
         private middleware: MiddlewareFn<C>,
     ) {}
     // TODO: add forms
+    // TODO: add menus
     async wait(): Promise<C> {
         if (this.insideExternal) {
             throw new Error(
@@ -38,6 +39,8 @@ First return your data from `external` and then resume update handling using `wa
             nextCalled = true;
             return Promise.resolve();
         });
+        // If a plugin decided to handle the update (did not call `next`), then
+        // we recurse and simply wait for another update.
         return nextCalled ? ctx : await this.wait();
     }
     async skip(): Promise<never> {
@@ -47,9 +50,9 @@ First return your data from `external` and then resume update handling using `wa
         return await this.controls.cancel("halt");
     }
     // deno-lint-ignore no-explicit-any
-    async external<F extends (ctx: Context) => any, I = any>(
-        op: F | ExternalOp<F, I>,
-    ): Promise<Awaited<ReturnType<F>>> {
+    async external<OC extends Context, R, I = any>(
+        op: ExternalOp<OC, R, I>["task"] | ExternalOp<OC, R, I>,
+    ): Promise<R> {
         // Make sure that no other ops are performed concurrently (or from
         // within the handler) because they will not be performed during a
         // replay so they will be missing from the logs then, which clogs up
@@ -65,16 +68,23 @@ First return your data from `external` and then resume update handling using `wa
 
         const {
             task,
-            afterLoad = (x: I) => x as ReturnType<F>,
+            afterLoad = (x: I) => x as unknown as R,
             afterLoadError = (e: unknown) => e,
-            beforeStore = (x: ReturnType<F>) => x as I,
+            beforeStore = (x: R) => x as unknown as I,
             beforeStoreError = (e: unknown) => e,
-        } = typeof op === "function" ? { task: op as F } : op;
+        } = typeof op === "function" ? { task: op } : op;
         // Prepare values before storing them
         const action = async () => {
             this.insideExternal = true;
             try {
-                const ret = await this.escape(task);
+                // We perform an unsafe cast to the context type used in the
+                // surrounding middleware system. Technically, we could drag
+                // this type along from outside by adding an extra type
+                // parameter everywhere, but this makes all types too cumbersome
+                // to work with for bot developers. The benefits of this
+                // massively reduced complexity outweight the potential benefits
+                // of slightly stricter types for `external`.
+                const ret = await this.escape((ctx) => task(ctx as OC));
                 return { ok: true, ret: await beforeStore(ret) } as const;
             } catch (e) {
                 return { ok: false, err: await beforeStoreError(e) } as const;
