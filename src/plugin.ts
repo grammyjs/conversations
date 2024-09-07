@@ -555,9 +555,10 @@ function hydrateContext<C extends Context>(
                             },
                         } as const;
                     } else {
-                        throw new Error("unknown error thrown", { // cannot happen
-                            cause: e,
-                        });
+                        throw new Error(
+                            `Unknown error thrown in conversation while calling '${method}'`,
+                            { cause: e },
+                        );
                     }
                 }
             }
