@@ -54,13 +54,25 @@ export interface ConversationKeyStorage<C extends Context> {
     delete?: never;
 }
 export interface ConversationOptions<OC extends Context, C extends Context> {
-    // TODO: make storage optional
-    storage: ConversationStorage<OC>;
+    storage?: ConversationStorage<OC>;
     plugins?: Middleware<C>[];
     onEnter?(id: string): MaybePromise<unknown>;
     onExit?(id: string): MaybePromise<unknown>;
 }
-function uniformStorage<C extends Context>(storage: ConversationStorage<C>) {
+function defaultStorage<C extends Context>(): ConversationKeyStorage<C> {
+    const store = new Map<string, ConversationData>();
+    return {
+        getStorageKey: (ctx) => ctx.chatId?.toString(),
+        adapter: {
+            read: (key) => store.get(key),
+            write: (key, state) => void store.set(key, state),
+            delete: (key) => void store.delete(key),
+        },
+    };
+}
+function uniformStorage<C extends Context>(
+    storage: ConversationStorage<C> = defaultStorage(),
+) {
     if ("getStorageKey" in storage) {
         return (ctx: C) => {
             const key = storage.getStorageKey(ctx);
