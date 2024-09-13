@@ -100,5 +100,17 @@ First return your data from `external` and then resume update handling using `wa
             throw await afterLoadError(ret.err);
         }
     }
+    async now() {
+        return await this.external(() => Date.now());
+    }
+    async random() {
+        return await this.external(() => Math.random());
+    }
+    async log(...data: unknown[]) {
+        await this.external(() => console.log(...data));
+    }
+    async error(...data: unknown[]) {
+        await this.external(() => console.error(...data));
+    }
     // TODO: add more methods
 }
