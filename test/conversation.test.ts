@@ -14,10 +14,13 @@ import {
     assertInstanceOf,
     assertNotStrictEquals,
     assertRejects,
+    assertSpyCall,
+    assertSpyCalls,
     assertStrictEquals,
     assertThrows,
     describe,
     it,
+    spy,
     stub,
 } from "./deps.test.ts";
 
@@ -616,5 +619,74 @@ describe("Conversation", () => {
         assertEquals(res.status, "complete");
         assert(res.status === "complete");
         assertEquals(j, 1);
+    });
+
+    it("should support now", async () => {
+        let i = 0;
+        let old: number | undefined;
+        async function convo(conversation: Conversation) {
+            const cnow = await conversation.now();
+            await conversation.external(() => old = cnow);
+            await conversation.wait();
+            assertEquals(old, cnow);
+            i++;
+        }
+        const first = await enterConversation(convo, mkctx());
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, mkctx(), first);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
+    });
+    it("should support random", async () => {
+        let i = 0;
+        let old: number | undefined;
+        async function convo(conversation: Conversation) {
+            const cnow = await conversation.random();
+            await conversation.external(() => old = cnow);
+            await conversation.wait();
+            assertEquals(old, cnow);
+            i++;
+        }
+        const first = await enterConversation(convo, mkctx());
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, mkctx(), first);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
+    });
+    it("should support log", async () => {
+        const log = spy((..._: unknown[]) => {});
+        using _ = stub(console, "log", log);
+        async function convo(conversation: Conversation) {
+            await conversation.log("foo", 42);
+            await conversation.wait();
+        }
+        const first = await enterConversation(convo, mkctx());
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, mkctx(), first);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertSpyCalls(log, 1);
+        assertSpyCall(log, 0, { args: ["foo", 42] });
+    });
+    it("should support error", async () => {
+        const err = spy((..._: unknown[]) => {});
+        using _ = stub(console, "error", err);
+        async function convo(conversation: Conversation) {
+            await conversation.error("foo", 42);
+            await conversation.wait();
+        }
+        const first = await enterConversation(convo, mkctx());
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, mkctx(), first);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertSpyCalls(err, 1);
+        assertSpyCall(err, 0, { args: ["foo", 42] });
     });
 });
