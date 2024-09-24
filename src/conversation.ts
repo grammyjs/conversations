@@ -38,7 +38,8 @@ type ApplyContext = <F extends (ctx: Context) => unknown>(
 
 export interface ConversationHandleOptions {
     onHalt?(): void | Promise<void>;
-    maxMillisecondsToWait: number | undefined;
+    maxMillisecondsToWait?: number;
+    seal?: boolean;
 }
 
 export interface WaitOptions {
@@ -99,8 +100,9 @@ First return your data from `external` and then resume update handling using `wa
         // we recurse and simply wait for another update.
         return nextCalled ? ctx : await this.wait();
     }
-    async skip(options?: SkipOptions): Promise<never> {
-        return await this.controls.cancel(options?.drop ? "drop" : "skip");
+    async skip(options: SkipOptions = {}): Promise<never> {
+        const drop = "drop" in options ? options.drop : this.options.seal;
+        return await this.controls.cancel(drop ? "drop" : "skip");
     }
     async halt(options?: HaltOptions): Promise<never> {
         await this.options.onHalt?.();

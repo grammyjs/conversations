@@ -363,6 +363,7 @@ export interface ConversationConfig<C extends Context> {
     id?: string;
     plugins?: Middleware<C>[];
     maxMillisecondsToWait?: number;
+    seal?: boolean;
 }
 
 export function createConversation<OC extends Context, C extends Context>(
@@ -373,6 +374,7 @@ export function createConversation<OC extends Context, C extends Context>(
         id = builder.name,
         plugins = [],
         maxMillisecondsToWait = undefined,
+        seal = false,
     } = typeof options === "string" ? { id: options } : options ?? {};
     if (!id) {
         throw new Error("Cannot register a conversation without a name!");
@@ -413,12 +415,19 @@ export function createConversation<OC extends Context, C extends Context>(
             api: ctx.api,
             me: ctx.me,
         };
+        const options: ResumeOptions<C> = {
+            ctx,
+            plugins: combinedPlugins,
+            onHalt,
+            maxMillisecondsToWait,
+            seal,
+        };
         const result = await runParallelConversations(
             builder,
             base,
             id,
             mutableData, // will be mutated on ctx
-            { ctx, plugins: combinedPlugins, onHalt, maxMillisecondsToWait },
+            options,
         );
         switch (result.status) {
             case "complete":
@@ -523,6 +532,7 @@ export interface ResumeOptions<C extends Context> {
     plugins?: Middleware<C>[];
     onHalt?: () => MaybePromise<void>;
     maxMillisecondsToWait?: number;
+    seal?: boolean;
 }
 export async function resumeConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
@@ -539,6 +549,7 @@ export async function resumeConversation<C extends Context>(
         plugins = [],
         onHalt,
         maxMillisecondsToWait,
+        seal,
     } = options ?? {};
     const middleware = new Composer(...plugins).middleware();
     // deno-lint-ignore no-explicit-any
@@ -548,6 +559,7 @@ export async function resumeConversation<C extends Context>(
         const convo = new Conversation(controls, hydrate, escape, middleware, {
             onHalt,
             maxMillisecondsToWait,
+            seal,
         });
         const ctx = await convo.wait({ maxMilliseconds: undefined });
         await conversation(convo, ctx, ...args);
