@@ -639,6 +639,7 @@ function hydrateContext<C extends Context>(
                     } else {
                         throw new Error(
                             `Unknown error thrown in conversation while calling '${method}'`,
+                            // @ts-ignore not available on old Node versions
                             { cause: e },
                         );
                     }
