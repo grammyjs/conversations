@@ -14,6 +14,7 @@ import {
     type User,
 } from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
+import { ConversationForm } from "./form.ts";
 type MaybeArray<T> = T | T[];
 export type StringWithCommandSuggestions =
     | (string & Record<never, never>)
@@ -65,8 +66,9 @@ export class Conversation<C extends Context = Context> {
         private middleware: MiddlewareFn<C>,
         private options: ConversationHandleOptions,
     ) {}
-    // TODO: add forms
     // TODO: add menus
+    // TODO: add checkpoints
+    // TODO: add all and any
     async wait(options: WaitOptions = {}): Promise<C> {
         if (this.insideExternal) {
             throw new Error(
@@ -254,4 +256,6 @@ First return your data from `external` and then resume update handling using `wa
             opts,
         );
     }
+
+    form = new ConversationForm(this);
 }
