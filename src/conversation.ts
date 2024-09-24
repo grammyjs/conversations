@@ -9,30 +9,57 @@ export interface ExternalOp<OC extends Context, R, I = any> {
     beforeStoreError?: (value: unknown) => unknown | Promise<unknown>;
     afterLoadError?: (value: unknown) => unknown | Promise<unknown>;
 }
-// deno-lint-ignore no-explicit-any
-type ApplyContext = <F extends (ctx: Context) => any>(
+type ApplyContext = <F extends (ctx: Context) => unknown>(
     fn: F,
 ) => Promise<ReturnType<F>>;
+
+export interface ConversationHandleOptions {
+    onHalt?(): void | Promise<void>;
+    maxMillisecondsToWait: number | undefined;
+}
+
+export interface WaitOptions {
+    maxMilliseconds?: number;
+}
+export interface SkipOptions {
+    drop?: boolean;
+}
+export interface HaltOptions {
+    proceed?: boolean;
+}
 
 export class Conversation<C extends Context = Context> {
     /** true if external is currently running, false otherwise */
     private insideExternal = false;
     constructor(
         private controls: ReplayControls,
-        private escape: ApplyContext,
         private hydrate: (update: Update) => C,
+        private escape: ApplyContext,
         private middleware: MiddlewareFn<C>,
+        private options: ConversationHandleOptions,
     ) {}
     // TODO: add forms
     // TODO: add menus
-    async wait(): Promise<C> {
+    async wait(options: WaitOptions = {}): Promise<C> {
         if (this.insideExternal) {
             throw new Error(
                 "Cannot wait for updates from inside `external`, or concurrently to it! \
 First return your data from `external` and then resume update handling using `wait` calls.",
             );
         }
+
+        const limit = "maxMilliseconds" in options
+            ? options.maxMilliseconds
+            : this.options.maxMillisecondsToWait;
+        const before = limit !== undefined && await this.now();
         const update = await this.controls.interrupt() as Update;
+        if (before !== false) {
+            const after = await this.now();
+            if (after - before >= limit) {
+                await this.halt({ proceed: true });
+            }
+        }
+
         const ctx = this.hydrate(update);
         let nextCalled = false;
         await this.middleware(ctx, () => {
@@ -43,11 +70,12 @@ First return your data from `external` and then resume update handling using `wa
         // we recurse and simply wait for another update.
         return nextCalled ? ctx : await this.wait();
     }
-    async skip(): Promise<never> {
-        return await this.controls.cancel("skip");
+    async skip(options?: SkipOptions): Promise<never> {
+        return await this.controls.cancel(options?.drop ? "drop" : "skip");
     }
-    async halt(): Promise<never> {
-        return await this.controls.cancel("halt");
+    async halt(options?: HaltOptions): Promise<never> {
+        await this.options.onHalt?.();
+        return await this.controls.cancel(options?.proceed ? "kill" : "halt");
     }
     // deno-lint-ignore no-explicit-any
     async external<OC extends Context, R, I = any>(

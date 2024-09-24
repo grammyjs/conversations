@@ -18,6 +18,7 @@ const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
 const internalDefaultPlugins = Symbol("conversations.plugins");
+const internalExitHandler = Symbol("conversations.exit");
 const internalCompletenessMarker = Symbol("conversations.completeness");
 
 export interface ContextBaseData {
@@ -109,6 +110,7 @@ type ConversationIndex<C extends Context> = Map<
 interface ConversationIndexEntry<C extends Context> {
     builder: ConversationBuilder<C>;
     plugins: Middleware<C>[];
+    maxMillisecondsToWait: number | undefined;
 }
 export type ConversationFlavor<C extends Context> = C & {
     conversation: ConversationControls;
@@ -127,10 +129,17 @@ export interface ConversationControls {
 function controls(
     getData: () => ConversationData,
     canSave: () => boolean,
-    // deno-lint-ignore no-explicit-any
-    enter: (name: string, ...args: any[]) => Promise<EnterResult>,
+    enter: (name: string, ...args: unknown[]) => Promise<EnterResult>,
     exit?: (name: string) => Promise<void>,
 ): ConversationControls {
+    async function fireExit(events: string[]) {
+        if (exit === undefined) return;
+        const len = events.length;
+        for (let i = 0; i < len; i++) {
+            await exit(events[i]);
+        }
+    }
+
     return {
         async enter(name, options) {
             if (!canSave()) {
@@ -169,42 +178,44 @@ to use `await`?",
             }
         },
         async exitAll() {
+            if (!canSave()) {
+                throw new Error(
+                    "The middleware has already completed so it is no longer possible to exit all conversations",
+                );
+            }
             const data = getData();
             const keys = Object.keys(data);
-            const len = keys.length;
-            let count = 0;
-            for (let i = 0; i < len; i++) {
-                const key = keys[i];
-                count += data[key].length;
-                delete data[key];
-            }
-            if (exit !== undefined) {
-                for (let i = 0; i < len; i++) {
-                    await exit(name);
-                }
-            }
+            const events = keys.flatMap((key) =>
+                Array<string>(data[key].length).fill(key)
+            );
+            keys.forEach((key) => delete data[key]);
+            await fireExit(events);
         },
         async exit(name) {
+            if (!canSave()) {
+                throw new Error(
+                    `The middleware has already completed so it is no longer possible to exit any conversations named '${name}'`,
+                );
+            }
             const data = getData();
             if (data[name] === undefined) return;
-            const len = data[name].length;
+            const events = Array<string>(data[name].length).fill(name);
             delete data[name];
-            if (exit !== undefined) {
-                for (let i = 0; i < len; i++) {
-                    await exit(name);
-                }
-            }
+            await fireExit(events);
         },
         async exitOne(name, index) {
+            if (!canSave()) {
+                throw new Error(
+                    `The middleware has already completed so it is no longer possible to exit the conversation '${name}'`,
+                );
+            }
             const data = getData();
             if (
                 data[name] === undefined ||
                 index < 0 || data[name].length <= index
             ) return;
             data[name].splice(index, 1);
-            if (exit !== undefined) {
-                await exit(name);
-            }
+            await fireExit([name]);
         },
         // deno-lint-ignore no-explicit-any
         active(name?: string): any {
@@ -220,7 +231,7 @@ to use `await`?",
 }
 
 export function conversations<OC extends Context, C extends Context>(
-    options: ConversationOptions<OC, C>,
+    options: ConversationOptions<OC, C> = {},
 ): MiddlewareFn<ConversationFlavor<OC>> {
     const createStorage = uniformStorage(options.storage);
     return async (ctx, next) => {
@@ -243,8 +254,7 @@ export function conversations<OC extends Context, C extends Context>(
         }
 
         const index: ConversationIndex<C> = new Map();
-        // deno-lint-ignore no-explicit-any
-        async function enter(id: string, ...args: any[]) {
+        async function enter(id: string, ...args: unknown[]) {
             const entry = index.get(id);
             if (entry === undefined) {
                 const known = Array.from(index.keys())
@@ -254,19 +264,23 @@ export function conversations<OC extends Context, C extends Context>(
                     `The conversation '${id}' has not been registered! Known conversations are: ${known}`,
                 );
             }
-            const { builder, plugins } = entry;
+            const { builder, plugins, maxMillisecondsToWait } = entry;
             await options.onEnter?.(id);
             const base: ContextBaseData = {
                 update: ctx.update,
                 api: ctx.api,
                 me: ctx.me,
             };
-            const opts = { args, ctx, plugins };
-            return await enterConversation(builder, base, opts);
+            return await enterConversation(builder, base, {
+                args,
+                ctx,
+                plugins,
+                maxMillisecondsToWait,
+            });
         }
         const exit = options.onExit !== undefined
-            ? async (id: string) => {
-                await options.onExit?.(id);
+            ? async (name: string) => {
+                await options.onExit?.(name);
             }
             : undefined;
 
@@ -279,6 +293,7 @@ export function conversations<OC extends Context, C extends Context>(
         Object.defineProperty(ctx, internalDefaultPlugins, {
             value: options.plugins ?? [],
         });
+        Object.defineProperty(ctx, internalExitHandler, { get: () => exit });
         Object.defineProperty(ctx, "conversation", {
             value: controls(getData, canSave, enter, exit),
         });
@@ -323,6 +338,7 @@ export type ConversationResult =
     | ConversationSkipped;
 export interface ConversationComplete {
     status: "complete";
+    proceed: boolean;
 }
 export interface ConversationError {
     status: "error";
@@ -346,17 +362,18 @@ export type ConversationBuilder<C extends Context> = (
 export interface ConversationConfig<C extends Context> {
     id?: string;
     plugins?: Middleware<C>[];
-    // TODO: add wait timeouts
-    // maxMillisecondsToWait?: number;
+    maxMillisecondsToWait?: number;
 }
 
 export function createConversation<OC extends Context, C extends Context>(
     builder: ConversationBuilder<C>,
     options?: string | ConversationConfig<C>,
 ): MiddlewareFn<ConversationFlavor<OC>> {
-    const { id = builder.name, plugins = [] } = typeof options === "string"
-        ? { id: options }
-        : options ?? {};
+    const {
+        id = builder.name,
+        plugins = [],
+        maxMillisecondsToWait = undefined,
+    } = typeof options === "string" ? { id: options } : options ?? {};
     if (!id) {
         throw new Error("Cannot register a conversation without a name!");
     }
@@ -364,7 +381,8 @@ export function createConversation<OC extends Context, C extends Context>(
         if (
             !(internalMutableState in ctx) ||
             !(internalIndex in ctx) ||
-            !(internalDefaultPlugins in ctx)
+            !(internalDefaultPlugins in ctx) ||
+            !(internalExitHandler in ctx)
         ) {
             throw new Error(
                 "Cannot register a conversation without installing the conversations plugin first!",
@@ -377,7 +395,17 @@ export function createConversation<OC extends Context, C extends Context>(
         }
         const defaultPlugins = ctx[internalDefaultPlugins] as Middleware<C>[];
         const combinedPlugins = [...defaultPlugins, ...plugins];
-        index.set(id, { builder, plugins: combinedPlugins });
+        index.set(id, {
+            builder,
+            plugins: combinedPlugins,
+            maxMillisecondsToWait,
+        });
+        const onExit = ctx[internalExitHandler] as
+            | ((name: string) => MaybePromise<unknown>)
+            | undefined;
+        const onHalt = async () => {
+            await onExit?.(id);
+        };
 
         const mutableData = ctx[internalMutableState] as ConversationData;
         const base: ContextBaseData = {
@@ -390,13 +418,19 @@ export function createConversation<OC extends Context, C extends Context>(
             base,
             id,
             mutableData, // will be mutated on ctx
-            { ctx, plugins: combinedPlugins },
+            { ctx, plugins: combinedPlugins, onHalt, maxMillisecondsToWait },
         );
         switch (result.status) {
+            case "complete":
+                if (result.proceed) await next();
+                return;
             case "error":
                 throw result.error;
             case "skipped":
                 await next();
+                return;
+            case "handled":
+                return;
         }
     };
 }
@@ -422,6 +456,10 @@ export async function runParallelConversations<C extends Context>(
                 states[i].interrupts = result.interrupts;
                 return result;
             case "complete":
+                states.splice(i, 1);
+                if (states.length === 0) delete data[id];
+                if (result.proceed) continue;
+                else return result;
             case "error":
                 states.splice(i, 1);
                 if (states.length === 0) delete data[id];
@@ -448,8 +486,7 @@ export interface EnterSkipped extends ConversationSkipped {
 }
 
 export interface EnterOptions<C extends Context> extends ResumeOptions<C> {
-    // deno-lint-ignore no-explicit-any
-    args?: any[];
+    args?: unknown[];
 }
 export async function enterConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
@@ -484,6 +521,8 @@ export async function enterConversation<C extends Context>(
 export interface ResumeOptions<C extends Context> {
     ctx?: Context;
     plugins?: Middleware<C>[];
+    onHalt?: () => MaybePromise<void>;
+    maxMillisecondsToWait?: number;
 }
 export async function resumeConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
@@ -493,14 +532,24 @@ export async function resumeConversation<C extends Context>(
 ): Promise<ConversationResult> {
     const { update, api, me } = base;
     const args = JSON.parse(state.args);
-    const { ctx = youTouchYouDie, plugins = [] } = options ?? {};
+    const {
+        ctx = youTouchYouDie<C>(
+            "The conversation was advanced from an event so there is no access to an outside context object",
+        ),
+        plugins = [],
+        onHalt,
+        maxMillisecondsToWait,
+    } = options ?? {};
     const middleware = new Composer(...plugins).middleware();
     // deno-lint-ignore no-explicit-any
     const escape = (fn: (ctx: Context) => any) => fn(ctx);
     const engine = new ReplayEngine(async (controls) => {
         const hydrate = hydrateContext<C>(controls, api, me);
-        const convo = new Conversation(controls, escape, hydrate, middleware);
-        const ctx = await convo.wait();
+        const convo = new Conversation(controls, hydrate, escape, middleware, {
+            onHalt,
+            maxMillisecondsToWait,
+        });
+        const ctx = await convo.wait({ maxMilliseconds: undefined });
         await conversation(convo, ctx, ...args);
     });
     const replayState = state.replay;
@@ -517,27 +566,48 @@ export async function resumeConversation<C extends Context>(
         switch (result.type) {
             case "returned":
                 // tell caller that we are done, all good
-                return { status: "complete" };
+                return { status: "complete", proceed: false };
             case "thrown":
                 // tell caller that an error was thrown, it should leave the
                 // conversation and rethrow the error
                 return { status: "error", error: result.error };
+            // TODO: disable lint until the following issue is fixed:
+            // https://github.com/denoland/deno_lint/issues/1331
+            // deno-lint-ignore no-fallthrough
             case "interrupted":
-                if (result.message === "skip") {
-                    // current interrupt was skipped, replay again with the next
-                    ReplayEngine.reset(replayState, checkpoint);
-                    continue;
-                } else if (result.message === "halt") {
-                    // tell caller that we are done, all good
-                    return { status: "complete" };
-                } else {
-                    // tell caller that we handled the update and updated the state
-                    return {
-                        status: "handled",
-                        replay: result.state,
-                        interrupts: result.interrupts,
-                    };
+                // check the type of interrupt by inspecting its message
+                switch (result.message) {
+                    case "skip":
+                        // current interrupt was skipped, replay again with the next
+                        ReplayEngine.reset(replayState, checkpoint);
+                        continue;
+                    case "drop":
+                        // drop the update, do not modify the state
+                        ReplayEngine.reset(replayState, checkpoint);
+                        return {
+                            status: "handled",
+                            replay: replayState,
+                            interrupts: ints,
+                        };
+                    case "halt":
+                        // tell caller that we are done, all good
+                        return { status: "complete", proceed: false };
+                    case "kill":
+                        // tell the called that we are done and that downstream
+                        // middleware must be called
+                        return { status: "complete", proceed: true };
+                    case undefined:
+                        // tell caller that we handled the update and updated the state
+                        return {
+                            status: "handled",
+                            replay: result.state,
+                            interrupts: result.interrupts,
+                        };
+                    default:
+                        throw new Error("never"); // cannot happen
                 }
+            default:
+                throw new Error("never"); // cannot happen
         }
     }
     // tell caller that we want to skip the update and did not modify the state
@@ -591,23 +661,23 @@ function hydrateContext<C extends Context>(
     };
 }
 
-function nope(): never {
-    throw new Error(
-        "The conversation was advanced from an event so there is no access to an outside context object",
-    );
+function youTouchYouDie<T extends object>(msg: string) {
+    function nope(): never {
+        throw new Error(msg);
+    }
+    return new Proxy({} as T, {
+        apply: nope,
+        construct: nope,
+        defineProperty: nope,
+        deleteProperty: nope,
+        get: nope,
+        getOwnPropertyDescriptor: nope,
+        getPrototypeOf: nope,
+        has: nope,
+        isExtensible: nope,
+        ownKeys: nope,
+        preventExtensions: nope,
+        set: nope,
+        setPrototypeOf: nope,
+    });
 }
-const youTouchYouDie = new Proxy({} as Context, {
-    apply: nope,
-    construct: nope,
-    defineProperty: nope,
-    deleteProperty: nope,
-    get: nope,
-    getOwnPropertyDescriptor: nope,
-    getPrototypeOf: nope,
-    has: nope,
-    isExtensible: nope,
-    ownKeys: nope,
-    preventExtensions: nope,
-    set: nope,
-    setPrototypeOf: nope,
-});
