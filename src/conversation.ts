@@ -1,5 +1,27 @@
-import { type Context, type MiddlewareFn, type Update } from "./deps.deno.ts";
+import {
+    type CallbackQueryContext,
+    type CommandContext,
+    Context,
+    type Filter,
+    type FilterQuery,
+    type GameQueryContext,
+    type HearsContext,
+    type MiddlewareFn,
+    type ReactionContext,
+    type ReactionType,
+    type ReactionTypeEmoji,
+    type Update,
+    type User,
+} from "./deps.deno.ts";
 import { type ReplayControls } from "./engine.ts";
+type MaybeArray<T> = T | T[];
+export type StringWithCommandSuggestions =
+    | (string & Record<never, never>)
+    | "start"
+    | "help"
+    | "settings"
+    | "privacy"
+    | "developer_info";
 
 // deno-lint-ignore no-explicit-any
 export interface ExternalOp<OC extends Context, R, I = any> {
@@ -24,6 +46,11 @@ export interface WaitOptions {
 export interface SkipOptions {
     drop?: boolean;
 }
+export interface OtherwiseOptions<C extends Context>
+    extends WaitOptions, SkipOptions {
+    otherwise?: (ctx: C) => unknown | Promise<unknown>;
+}
+
 export interface HaltOptions {
     proceed?: boolean;
 }
@@ -140,5 +167,91 @@ First return your data from `external` and then resume update handling using `wa
     async error(...data: unknown[]) {
         await this.external(() => console.error(...data));
     }
-    // TODO: add more methods
+
+    async waitUntil<D extends C>(
+        predicate: (ctx: C) => ctx is D,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<D>;
+    async waitUntil(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<C>;
+    async waitUntil(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+        opts: OtherwiseOptions<C> = {},
+    ): Promise<C> {
+        const { otherwise, drop, ...waitOptions } = opts;
+        const ctx = await this.wait(waitOptions);
+        if (!await predicate(ctx)) {
+            await otherwise?.(ctx);
+            await this.skip({ drop });
+        }
+        return ctx;
+    }
+    async waitUnless(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<C> {
+        return await this.waitUntil(async (ctx) => !await predicate(ctx), opts);
+    }
+    async waitFor<Q extends FilterQuery>(
+        query: Q | Q[],
+        opts?: OtherwiseOptions<C>,
+    ): Promise<Filter<C, Q>> {
+        return await this.waitUntil(Context.has.filterQuery(query), opts);
+    }
+    async waitForHears(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<HearsContext<C>> {
+        return await this.waitUntil(Context.has.text(trigger), opts);
+    }
+    async waitForCommand(
+        command: MaybeArray<StringWithCommandSuggestions>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<CommandContext<C>> {
+        return await this.waitUntil(Context.has.command(command), opts);
+    }
+    async waitForReaction(
+        reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<ReactionContext<C>> {
+        return await this.waitUntil(Context.has.reaction(reaction), opts);
+    }
+    async waitForCallbackQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<CallbackQueryContext<C>> {
+        return await this.waitUntil(Context.has.callbackQuery(trigger), opts);
+    }
+    async waitForGameQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<GameQueryContext<C>> {
+        return await this.waitUntil(Context.has.gameQuery(trigger), opts);
+    }
+    async waitFrom(
+        user: number | User,
+        opts?: OtherwiseOptions<C>,
+    ): Promise<C & { from: User }> {
+        const id = typeof user === "number" ? user : user.id;
+        return await this.waitUntil(
+            (ctx: C): ctx is C & { from: User } => ctx.from?.id === id,
+            opts,
+        );
+    }
+    async waitForReplyTo(
+        message_id: number | { message_id: number },
+        opts?: OtherwiseOptions<C>,
+    ): Promise<Filter<C, "message" | "channel_post">> {
+        const id = typeof message_id === "number"
+            ? message_id
+            : message_id.message_id;
+        return await this.waitUntil(
+            (ctx): ctx is Filter<C, "message" | "channel_post"> =>
+                ctx.message?.reply_to_message?.message_id === id ||
+                ctx.channelPost?.reply_to_message?.message_id === id,
+            opts,
+        );
+    }
 }
