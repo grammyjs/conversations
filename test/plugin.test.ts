@@ -31,9 +31,9 @@ import {
 } from "./deps.test.ts";
 
 type TestContext = ConversationFlavor<Context>;
-function mkctx() {
+function mkctx(update: unknown = {}) {
     return new Context(
-        {} as Update,
+        update as Update,
         new Api("dummy"),
         {} as UserFromGetMe,
     ) as TestContext;
@@ -243,6 +243,120 @@ describe("createConversation", () => {
         await mw.middleware()(mkctx(), next);
         await mw.middleware()(mkctx(), next);
         assertEquals(i, 1);
+    });
+    it("should halt the conversation upon default wait timeout", async () => {
+        const onExit = spy(() => {});
+        const mw = new Composer<TestContext>();
+        let enter = true;
+        let i = 0;
+        let j = 0;
+        mw.use(
+            conversations({ onExit }),
+            createConversation(async (convo) => {
+                i++;
+                await convo.wait();
+                j++;
+            }, {
+                id: "convo",
+                maxMillisecondsToWait: 10,
+            }),
+            async (ctx) => {
+                if (!enter) return;
+                enter = false;
+                await ctx.conversation.enter("convo");
+            },
+        );
+        const up = { message: { chat: { id: 0 } } };
+        await mw.middleware()(mkctx(up), next);
+        await new Promise((r) => setTimeout(r, 15));
+        await mw.middleware()(mkctx(up), next);
+        assertEquals(i, 2);
+        assertEquals(j, 0);
+        assertSpyCalls(onExit, 1);
+        assertSpyCall(onExit, 0, { args: ["convo"] });
+    });
+    it("should continue if default wait timeouts do not kick in", async () => {
+        const onExit = spy(() => {});
+        const mw = new Composer<TestContext>();
+        let enter = true;
+        let i = 0;
+        let j = 0;
+        mw.use(
+            conversations({ onExit }),
+            createConversation(async (convo) => {
+                i++;
+                await convo.wait();
+                j++;
+            }, {
+                id: "convo",
+                maxMillisecondsToWait: 10,
+            }),
+            async (ctx) => {
+                if (!enter) return;
+                enter = false;
+                await ctx.conversation.enter("convo");
+            },
+        );
+        const up = { message: { chat: { id: 0 } } };
+        await mw.middleware()(mkctx(up), next);
+        await new Promise((r) => setTimeout(r, 5));
+        await mw.middleware()(mkctx(up), next);
+        assertEquals(i, 2);
+        assertEquals(j, 1);
+    });
+    it("should halt the conversation upon wait timeout", async () => {
+        const onExit = spy(() => {});
+        const mw = new Composer<TestContext>();
+        let enter = true;
+        let i = 0;
+        let j = 0;
+        mw.use(
+            conversations({ onExit }),
+            createConversation(async (convo) => {
+                i++;
+                await convo.wait({ maxMilliseconds: 10 });
+                j++;
+            }, "convo"),
+            async (ctx) => {
+                if (!enter) return;
+                enter = false;
+                await ctx.conversation.enter("convo");
+            },
+        );
+        const up = { message: { chat: { id: 0 } } };
+        await mw.middleware()(mkctx(up), next);
+        await new Promise((r) => setTimeout(r, 15));
+        await mw.middleware()(mkctx(up), next);
+        assertEquals(i, 2);
+        assertEquals(j, 0);
+        assertSpyCalls(onExit, 1);
+        assertSpyCall(onExit, 0, { args: ["convo"] });
+    });
+    it("should continue if wait timeouts do not kick in", async () => {
+        const onExit = spy(() => {});
+        const mw = new Composer<TestContext>();
+        let enter = true;
+        let i = 0;
+        let j = 0;
+        mw.use(
+            conversations({ onExit }),
+            createConversation(async (convo) => {
+                i++;
+                await convo.wait({ maxMilliseconds: 10 });
+                j++;
+            }, "convo"),
+            async (ctx) => {
+                if (!enter) return;
+                enter = false;
+                await ctx.conversation.enter("convo");
+            },
+        );
+        const up = { message: { chat: { id: 0 } } };
+        await mw.middleware()(mkctx(up), next);
+        await new Promise((r) => setTimeout(r, 5));
+        await mw.middleware()(mkctx(up), next);
+        assertEquals(i, 2);
+        assertEquals(j, 1);
     });
     describe("via ctx.conversation", () => {
         it("should support entering conversations", async () => {
