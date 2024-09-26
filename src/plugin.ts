@@ -10,9 +10,12 @@ import {
     type Update,
     type UserFromGetMe,
 } from "./deps.deno.ts";
-import { type ReplayControls, ReplayEngine } from "./engine.ts";
-import { type ReplayState } from "./state.ts";
-export type { Conversation } from "./conversation.ts";
+import {
+    type ReplayControls,
+    ReplayEngine,
+    type ReplayState,
+} from "./engine.ts";
+export { type Conversation } from "./conversation.ts";
 
 const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
