@@ -10,8 +10,8 @@ import {
 export { type Checkpoint, type ReplayState } from "./state.ts";
 
 export interface ReplayControls {
-    interrupt(key?: string): Promise<unknown>;
-    cancel(key?: string): Promise<never>;
+    interrupt(key: string): Promise<unknown>;
+    cancel(message?: unknown): Promise<never>;
     action<R = unknown>(
         fn: () => R | Promise<R>,
         key?: string,
@@ -30,7 +30,7 @@ export interface Thrown {
 }
 export interface Interrupted {
     type: "interrupted";
-    message?: string;
+    message?: unknown;
     state: ReplayState;
     interrupts: number[];
 }
@@ -74,7 +74,7 @@ async function replayState(
     // Set up interrupt and action tracking
     let interrupted = false;
     const interrupts: number[] = [];
-    let message: string | undefined = undefined;
+    let message: unknown = undefined;
     let boundary = resolver();
     const actions = new Set<number>();
     function updateBoundary() {
@@ -118,7 +118,7 @@ async function replayState(
     }
 
     // Define replay controls
-    async function interrupt(key?: string) {
+    async function interrupt(key: string) {
         if (returned || (interrupted && interrupts.length === 0)) {
             // Already returned or canceled, so we must no longer perform an interrupt.
             await boom();
