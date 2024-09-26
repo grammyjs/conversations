@@ -98,7 +98,7 @@ First return your data from `external` and then resume update handling using `wa
         });
         // If a plugin decided to handle the update (did not call `next`), then
         // we recurse and simply wait for another update.
-        return nextCalled ? ctx : await this.wait();
+        return nextCalled ? ctx : await this.wait(options);
     }
     async skip(options: SkipOptions = {}): Promise<never> {
         const drop = "drop" in options ? options.drop : this.options.seal;
