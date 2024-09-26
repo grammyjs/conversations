@@ -7,6 +7,7 @@ import {
     mutate,
     type ReplayState,
 } from "./state.ts";
+export { type Checkpoint, type ReplayState } from "./state.ts";
 
 export interface ReplayControls {
     interrupt(key?: string): Promise<unknown>;
