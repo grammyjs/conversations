@@ -44,6 +44,7 @@ export interface ConversationHandleOptions {
 
 export interface WaitOptions {
     maxMilliseconds?: number;
+    collationKey?: string;
 }
 export interface SkipOptions {
     drop?: boolean;
@@ -70,7 +71,9 @@ export class Conversation<C extends Context = Context> {
     // TODO: add menus
     // TODO: add checkpoints
     // TODO: add all and any
-    async wait(options: WaitOptions = {}): Promise<C> {
+    async wait(
+        options: WaitOptions = {},
+    ): Promise<C> {
         if (this.insideExternal) {
             throw new Error(
                 "Cannot wait for updates from inside `external`, or concurrently to it! \
@@ -81,8 +84,9 @@ First return your data from `external` and then resume update handling using `wa
         const limit = "maxMilliseconds" in options
             ? options.maxMilliseconds
             : this.options.maxMillisecondsToWait;
+        const key = options.collationKey ?? "wait";
         const before = limit !== undefined && await this.now();
-        const update = await this.controls.interrupt() as Update;
+        const update = await this.controls.interrupt(key) as Update;
         if (before !== false) {
             const after = await this.now();
             if (after - before >= limit) {
@@ -108,6 +112,12 @@ First return your data from `external` and then resume update handling using `wa
         await this.options.onHalt?.();
         return await this.controls.cancel(options?.proceed ? "kill" : "halt");
     }
+    // checkpoint(): Checkpoint {
+    //     return this.controls.checkpoint();
+    // }
+    // async rewind(checkpoint: Checkpoint): Promise<never> {
+    //     return await this.controls.cancel(checkpoint);
+    // }
     // deno-lint-ignore no-explicit-any
     async external<OC extends Context, R, I = any>(
         op: ExternalOp<OC, R, I>["task"] | ExternalOp<OC, R, I>,
@@ -152,7 +162,7 @@ First return your data from `external` and then resume update handling using `wa
             }
         };
         // Recover values after loading them
-        const ret = await this.controls.action(action);
+        const ret = await this.controls.action(action, "external");
         if (ret.ok) {
             return await afterLoad(ret.ret);
         } else {
@@ -185,7 +195,7 @@ First return your data from `external` and then resume update handling using `wa
         opts: OtherwiseOptions<C> = {},
     ): Promise<C> {
         const { otherwise, drop, ...waitOptions } = opts;
-        const ctx = await this.wait(waitOptions);
+        const ctx = await this.wait({ collationKey: "until", ...waitOptions });
         if (!await predicate(ctx)) {
             await otherwise?.(ctx);
             await this.skip({ drop });
@@ -196,43 +206,64 @@ First return your data from `external` and then resume update handling using `wa
         predicate: (ctx: C) => boolean | Promise<boolean>,
         opts?: OtherwiseOptions<C>,
     ): Promise<C> {
-        return await this.waitUntil(async (ctx) => !await predicate(ctx), opts);
+        return await this.waitUntil(async (ctx) => !await predicate(ctx), {
+            collationKey: "unless",
+            ...opts,
+        });
     }
     async waitFor<Q extends FilterQuery>(
         query: Q | Q[],
         opts?: OtherwiseOptions<C>,
     ): Promise<Filter<C, Q>> {
-        return await this.waitUntil(Context.has.filterQuery(query), opts);
+        return await this.waitUntil(Context.has.filterQuery(query), {
+            collationKey: Array.isArray(query) ? query.join(",") : query,
+            ...opts,
+        });
     }
     async waitForHears(
         trigger: MaybeArray<string | RegExp>,
         opts?: OtherwiseOptions<C>,
     ): Promise<HearsContext<C>> {
-        return await this.waitUntil(Context.has.text(trigger), opts);
+        return await this.waitUntil(Context.has.text(trigger), {
+            collationKey: "hears",
+            ...opts,
+        });
     }
     async waitForCommand(
         command: MaybeArray<StringWithCommandSuggestions>,
         opts?: OtherwiseOptions<C>,
     ): Promise<CommandContext<C>> {
-        return await this.waitUntil(Context.has.command(command), opts);
+        return await this.waitUntil(Context.has.command(command), {
+            collationKey: "command",
+            ...opts,
+        });
     }
     async waitForReaction(
         reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
         opts?: OtherwiseOptions<C>,
     ): Promise<ReactionContext<C>> {
-        return await this.waitUntil(Context.has.reaction(reaction), opts);
+        return await this.waitUntil(Context.has.reaction(reaction), {
+            collationKey: "reaction",
+            ...opts,
+        });
     }
     async waitForCallbackQuery(
         trigger: MaybeArray<string | RegExp>,
         opts?: OtherwiseOptions<C>,
     ): Promise<CallbackQueryContext<C>> {
-        return await this.waitUntil(Context.has.callbackQuery(trigger), opts);
+        return await this.waitUntil(Context.has.callbackQuery(trigger), {
+            collationKey: "callback",
+            ...opts,
+        });
     }
     async waitForGameQuery(
         trigger: MaybeArray<string | RegExp>,
         opts?: OtherwiseOptions<C>,
     ): Promise<GameQueryContext<C>> {
-        return await this.waitUntil(Context.has.gameQuery(trigger), opts);
+        return await this.waitUntil(Context.has.gameQuery(trigger), {
+            collationKey: "game",
+            ...opts,
+        });
     }
     async waitFrom(
         user: number | User,
@@ -241,7 +272,7 @@ First return your data from `external` and then resume update handling using `wa
         const id = typeof user === "number" ? user : user.id;
         return await this.waitUntil(
             (ctx: C): ctx is C & { from: User } => ctx.from?.id === id,
-            opts,
+            { collationKey: `from-${id}`, ...opts },
         );
     }
     async waitForReplyTo(
@@ -255,7 +286,7 @@ First return your data from `external` and then resume update handling using `wa
             (ctx): ctx is Filter<C, "message" | "channel_post"> =>
                 ctx.message?.reply_to_message?.message_id === id ||
                 ctx.channelPost?.reply_to_message?.message_id === id,
-            opts,
+            { collationKey: `reply-${id}`, ...opts },
         );
     }
 

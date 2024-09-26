@@ -5,7 +5,7 @@ export interface ReplayState {
     receive: ReceiveOp[];
 }
 interface SendOp {
-    payload?: string;
+    payload: string;
 }
 interface ReceiveOp {
     send: number;
@@ -37,9 +37,9 @@ export function inspect(state: ReplayState) {
 }
 
 export function mutate(state: ReplayState) {
-    function op(payload?: string) {
+    function op(payload: string) {
         const index = state.send.length;
-        state.send.push(payload === undefined ? {} : { payload });
+        state.send.push({ payload });
         return index;
     }
     function done(op: number, result: unknown) {
@@ -66,7 +66,7 @@ export function cursor(state: ReplayState) {
     let send = 0; // 0 <= send <= state.send.length
     let receive = 0; // 0 <= receive <= state.receive.length
 
-    function op(payload?: string) {
+    function op(payload: string) {
         if (send < state.send.length) {
             // replay existing data (do nothing)
             const expected = state.send[send].payload;
@@ -75,7 +75,7 @@ export function cursor(state: ReplayState) {
             }
         } else { // send === state.send.length
             // log new data
-            state.send.push(payload === undefined ? {} : { payload });
+            state.send.push({ payload });
         }
         const index = send++;
         notify();
@@ -108,7 +108,7 @@ export function cursor(state: ReplayState) {
 
     async function perform(
         action: (op: number) => unknown | Promise<unknown>,
-        payload?: string,
+        payload: string,
     ) {
         const index = op(payload);
         return await done(index, () => action(index));

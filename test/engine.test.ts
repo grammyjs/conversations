@@ -29,12 +29,10 @@ describe("ReplayEngine", () => {
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
         assert(result.type === "interrupted");
-        assertEquals(result.message, "a");
         assertEquals(result.interrupts.length, 1);
         ReplayEngine.supply(result.state, result.interrupts[0], "zero");
         result = await engine.replay(result.state);
         assert(result.type === "interrupted");
-        assertEquals(result.message, "b");
         ReplayEngine.supply(result.state, result.interrupts[0], "one");
         assertEquals(result.interrupts.length, 1);
         result = await engine.replay(result.state);
@@ -45,9 +43,9 @@ describe("ReplayEngine", () => {
         let i = 0;
         const action = spy(() => i++);
         const builder = spy(async (c: ReplayControls) => {
-            const r0 = await c.action(action);
-            const i0 = await c.interrupt();
-            const r1 = await c.action(action);
+            const r0 = await c.action(action, "a");
+            const i0 = await c.interrupt("i");
+            const r1 = await c.action(action, "b");
             assertEquals(r0, 0);
             assertEquals(i0, "inject");
             assertEquals(r1, 1);
@@ -69,12 +67,12 @@ describe("ReplayEngine", () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
             const vals = await Promise.all([
-                c.action(() => Promise.resolve(i++)),
-                c.action(() => i++),
-                c.action(() => Promise.resolve(i++)),
+                c.action(() => Promise.resolve(i++), "a"),
+                c.action(() => i++, "b"),
+                c.action(() => Promise.resolve(i++), "c"),
             ]);
             assertEquals(vals, [0, 1, 2]);
-            await c.interrupt();
+            await c.interrupt("i");
         });
         const engine = new ReplayEngine(builder);
         let result = await engine.play();
@@ -92,12 +90,12 @@ describe("ReplayEngine", () => {
         const action = spy(() => Promise.resolve(i++));
         const builder = spy(async (c: ReplayControls) => {
             let order = "a";
-            c.action(action).then(() => order += "b");
-            const int = await c.interrupt();
+            c.action(action, "x").then(() => order += "b");
+            const int = await c.interrupt("i");
             order += "c";
-            c.action(action).then(() => order += "e");
+            c.action(action, "y").then(() => order += "e");
             order += "d";
-            const res = await c.action(action);
+            const res = await c.action(action, "z");
             order += "f";
             assertEquals(int, "inject");
             assertEquals(res, 2);
@@ -124,11 +122,11 @@ describe("ReplayEngine", () => {
             await resolveAction.promise;
         });
         const builder = spy(async (c: ReplayControls) => {
-            c.action(action);
+            c.action(action, "a");
             resolvePlay.resolve();
-            const inject = await c.interrupt();
+            const inject = await c.interrupt("i");
             assertEquals(inject, "inject");
-            c.action(action);
+            c.action(action, "b");
             resolvePlay.resolve();
         });
         const engine = new ReplayEngine(builder);
@@ -168,27 +166,27 @@ describe("ReplayEngine", () => {
         const action = spy(() => Promise.resolve(i++));
         const builder = spy(async (c: ReplayControls) => {
             let answer = 42;
-            const i0 = c.interrupt().then(async (r0) => {
+            const i0 = c.interrupt("a").then(async (r0) => {
                 checkpoints.push("i0");
                 assertEquals(r0, "one");
-                answer += Number(await c.action(action));
-                const r00 = await c.interrupt();
+                answer += Number(await c.action(action, "0"));
+                const r00 = await c.interrupt("b");
                 checkpoints.push("i00");
                 assertEquals(r00, "three");
                 const [r01, r02] = await Promise.all([
-                    c.interrupt(),
-                    c.interrupt(),
+                    c.interrupt("c"),
+                    c.interrupt("d"),
                 ]);
                 checkpoints.push("i01", "i02");
                 assertEquals(r01, "five");
                 assertEquals(r02, "six");
                 return "A";
             });
-            const i1 = c.interrupt().then(async (r1) => {
+            const i1 = c.interrupt("e").then(async (r1) => {
                 checkpoints.push("i1");
                 assertEquals(r1, "two");
-                answer += Number(await c.action(action));
-                const r10 = await c.interrupt();
+                answer += Number(await c.action(action, "1"));
+                const r10 = await c.interrupt("f");
                 checkpoints.push("i10");
                 assertEquals(r10, "four");
                 return "B";
@@ -231,12 +229,12 @@ describe("ReplayEngine", () => {
         );
         let initialPlay = true;
         const builder = spy(async (c: ReplayControls) => {
-            c.interrupt();
-            const r0 = await c.action(action);
+            c.interrupt("x");
+            const r0 = await c.action(action, "a");
             assertEquals(r0, 0);
-            await c.action(() => assert(initialPlay));
-            const int = await c.interrupt();
-            const r1 = await c.action(action);
+            await c.action(() => assert(initialPlay), "b");
+            const int = await c.interrupt("y");
+            const r1 = await c.action(action, "c");
             assertEquals(int, "inject");
             assertEquals(r1, 1);
         });
@@ -262,11 +260,11 @@ describe("ReplayEngine", () => {
         let j = 0;
         const action = spy(() => i++);
         const builder = spy(async (c: ReplayControls) => {
-            c.interrupt().then(() => {
-                c.action(action);
+            c.interrupt("x").then(() => {
+                c.action(action, "a");
             });
-            await c.interrupt();
-            c.interrupt(); // never resolves
+            await c.interrupt("y");
+            c.interrupt("z"); // never resolves
             j++;
         });
         const engine = new ReplayEngine(builder);
@@ -288,9 +286,9 @@ describe("ReplayEngine", () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
             const rsr = resolver();
-            c.interrupt().then((i0) => {
-                c.interrupt().then((i1) => {
-                    c.interrupt().then((i2) => {
+            c.interrupt("a").then((i0) => {
+                c.interrupt("b").then((i1) => {
+                    c.interrupt("c").then((i2) => {
                         assertEquals([i0, i1, i2], ["one", "two", "three"]);
                         i++;
                         rsr.resolve();
@@ -316,15 +314,15 @@ describe("ReplayEngine", () => {
         const action = spy(() => i++);
         const builder = spy(async (c: ReplayControls) => {
             const rsr = resolver();
-            c.interrupt().then((i0) => {
+            c.interrupt("0").then((i0) => {
                 assertEquals(i0, "one");
-                c.action(action).then((r0) => {
+                c.action(action, "a").then((r0) => {
                     assertEquals(r0, 0);
-                    c.interrupt().then((i1) => {
+                    c.interrupt("1").then((i1) => {
                         assertEquals(i1, "two");
-                        c.action(action).then(async (r1) => {
+                        c.action(action, "b").then(async (r1) => {
                             assertEquals(r1, 1);
-                            assertEquals(await c.interrupt(), "three");
+                            assertEquals(await c.interrupt("2"), "three");
                             inner = true;
                             rsr.resolve();
                         });
@@ -354,37 +352,28 @@ describe("ReplayEngine", () => {
     it("should support canceling", async () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
-            const res = await c.action(() => i++);
+            const res = await c.action(() => i++, "a");
             assertEquals(res, i - 1);
             await c.cancel("x");
         });
         const engine = new ReplayEngine(builder);
-        let result = await engine.play();
+        const result = await engine.play();
         assertEquals(i, 1);
-        assert(result.type === "interrupted");
+        assert(result.type === "canceled");
         assertEquals(result.message, "x");
-        assertEquals(result.interrupts.length, 0);
-        result = await engine.replay(result.state);
-        assertEquals(i, 1);
-        assert(result.type === "interrupted");
-        assertEquals(result.message, "x");
-        assertEquals(result.interrupts.length, 0);
-        assertSpyCalls(builder, 2);
+        assertSpyCalls(builder, 1);
         assertSpyCall(builder, 0, {
-            returned: new Promise(() => {/* pending */}),
-        });
-        assertSpyCall(builder, 1, {
             returned: new Promise(() => {/* pending */}),
         });
     });
     it("should support floating cancel ops", async () => {
         let i = 0;
         const builder = spy(async (c: ReplayControls) => {
-            const res0 = await c.interrupt();
+            const res0 = await c.interrupt("x");
             assertEquals(res0, "zero");
-            c.cancel("x");
+            c.cancel("y");
             // The interrupt has no effect since we already called cancel
-            const res1 = await c.interrupt("y");
+            const res1 = await c.interrupt("z");
             assertEquals(res1, "one");
             i++;
         });
@@ -393,9 +382,8 @@ describe("ReplayEngine", () => {
         assert(result.type === "interrupted");
         ReplayEngine.supply(result.state, result.interrupts[0], "zero");
         result = await engine.replay(result.state);
-        assert(result.type === "interrupted"); // interrupted due to cancel
-        assertEquals(result.interrupts, []); // interrupt disregarded
-        assertEquals(result.message, "x"); // message is from cancel not interrupt
+        assert(result.type === "canceled"); // canceled not interrupted
+        assertEquals(result.message, "y");
         assertSpyCalls(builder, 2);
         assertEquals(i, 0);
     });

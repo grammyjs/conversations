@@ -50,7 +50,7 @@ describe("mutate and inspect", () => {
         assertThrows(() => mut.done(-1, "result"));
         assertThrows(() => mut.done(0, "result"));
         assertThrows(() => mut.done(1, "result"));
-        const op0 = mut.op();
+        const op0 = mut.op("x");
         assertThrows(() => mut.done(-1, "result"), Error, "Op -1 is invalid");
         mut.done(op0, "result");
         assertThrows(() => mut.done(1, "result"), Error, "No op 1 in state");
@@ -126,7 +126,7 @@ describe("cursor", () => {
         await assertRejects(() => cur.done(-1, () => "result"));
         await assertRejects(() => cur.done(0, () => "result"));
         await assertRejects(() => cur.done(3, () => "result"));
-        const op0 = cur.op();
+        const op0 = cur.op("x");
         await assertRejects(() => cur.done(-1, () => "result"));
         await assertRejects(() => cur.done(3, () => "result"));
         assertEquals(await cur.done(op0, () => "result"), "result");
@@ -318,7 +318,7 @@ describe("cursor", () => {
                     // never resolves
                 });
             }, "payload"),
-            cur.perform(() => 42),
+            cur.perform(() => 42, "other-payload"),
         ]);
         const get = inspect(state);
         assertEquals(get.opCount(), 2);

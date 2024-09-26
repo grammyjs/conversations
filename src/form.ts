@@ -25,6 +25,7 @@ export type FormOptions<C extends Context> = Action<C> | FormConfig<C>;
 export interface FormConfig<C extends Context> {
     drop?: boolean;
     maxMilliseconds?: number;
+    collationKey?: string;
     action?: Action<C>;
     otherwise?: Action<C>;
 }
@@ -37,14 +38,19 @@ export interface FormBuilder<C extends Context, T> extends FormConfig<C> {
 export class ConversationForm<C extends Context> {
     constructor(
         private readonly conversation: {
-            wait: (opts: { maxMilliseconds?: number }) => Promise<C>;
+            wait: (
+                opts: { maxMilliseconds?: number; collationKey?: string },
+            ) => Promise<C>;
             skip: (opts: { drop?: boolean }) => Promise<never>;
         },
     ) {}
 
     async build<T>(builder: FormBuilder<C, T>) {
         const { validate, action, otherwise, drop, ...waitOptions } = builder;
-        const ctx = await this.conversation.wait(waitOptions);
+        const ctx = await this.conversation.wait({
+            collationKey: "form",
+            ...waitOptions,
+        });
         const result = await validate(ctx);
         if (result.ok) {
             if (action !== undefined) await action(ctx);
@@ -56,6 +62,7 @@ export class ConversationForm<C extends Context> {
     }
     async text(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-text",
             ...options,
             validate: (ctx): Maybe<string> => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
@@ -66,6 +73,7 @@ export class ConversationForm<C extends Context> {
     }
     async number(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-number",
             ...options,
             validate: (ctx): Maybe<number> => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
@@ -79,6 +87,7 @@ export class ConversationForm<C extends Context> {
     async int(options?: FormOptions<C> & { radix?: number }) {
         const { radix, ...opts } = options ?? {};
         return await this.build({
+            collationKey: "form-int",
             ...opts,
             validate: (ctx): Maybe<number> => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
@@ -92,6 +101,7 @@ export class ConversationForm<C extends Context> {
     async select<E extends string>(entries: E[], options?: FormOptions<C>) {
         const e: string[] = entries;
         return await this.build({
+            collationKey: "form-select",
             ...options,
             validate: (ctx): Maybe<E> => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
@@ -106,6 +116,7 @@ export class ConversationForm<C extends Context> {
         options?: FormOptions<C>,
     ) {
         return await this.build({
+            collationKey: "form-entity",
             ...options,
             validate: (ctx): Maybe<MessageEntity & { text: string }> => {
                 const entities = ctx.entities(type);
@@ -116,6 +127,7 @@ export class ConversationForm<C extends Context> {
     }
     async animation(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-animation",
             ...options,
             validate: (ctx): Maybe<Animation> => {
                 const animation = (ctx.message ?? ctx.channelPost)?.animation;
@@ -126,6 +138,7 @@ export class ConversationForm<C extends Context> {
     }
     async audio(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-audio",
             ...options,
             validate: (ctx): Maybe<Audio> => {
                 const audio = (ctx.message ?? ctx.channelPost)?.audio;
@@ -136,6 +149,7 @@ export class ConversationForm<C extends Context> {
     }
     async document(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-document",
             ...options,
             validate: (ctx): Maybe<Document> => {
                 const document = (ctx.message ?? ctx.channelPost)?.document;
@@ -144,8 +158,9 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
-    async paid_media(options?: FormOptions<C>) {
+    async paidMedia(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-paid_media",
             ...options,
             validate: (ctx): Maybe<PaidMediaInfo> => {
                 const paid_media = (ctx.message ?? ctx.channelPost)?.paid_media;
@@ -156,6 +171,7 @@ export class ConversationForm<C extends Context> {
     }
     async photo(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-photo",
             ...options,
             validate: (ctx): Maybe<PhotoSize[]> => {
                 const photo = (ctx.message ?? ctx.channelPost)?.photo;
@@ -166,6 +182,7 @@ export class ConversationForm<C extends Context> {
     }
     async sticker(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-sticker",
             ...options,
             validate: (ctx): Maybe<Sticker> => {
                 const sticker = (ctx.message ?? ctx.channelPost)?.sticker;
@@ -176,6 +193,7 @@ export class ConversationForm<C extends Context> {
     }
     async story(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-story",
             ...options,
             validate: (ctx): Maybe<Story> => {
                 const story = (ctx.message ?? ctx.channelPost)?.story;
@@ -186,6 +204,7 @@ export class ConversationForm<C extends Context> {
     }
     async video(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-video",
             ...options,
             validate: (ctx): Maybe<Video> => {
                 const video = (ctx.message ?? ctx.channelPost)?.video;
@@ -196,6 +215,7 @@ export class ConversationForm<C extends Context> {
     }
     async video_note(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-video_note",
             ...options,
             validate: (ctx): Maybe<VideoNote> => {
                 const video_note = (ctx.message ?? ctx.channelPost)?.video_note;
@@ -206,6 +226,7 @@ export class ConversationForm<C extends Context> {
     }
     async voice(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-voice",
             ...options,
             validate: (ctx): Maybe<Voice> => {
                 const voice = (ctx.message ?? ctx.channelPost)?.voice;
@@ -216,6 +237,7 @@ export class ConversationForm<C extends Context> {
     }
     async contact(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-contact",
             ...options,
             validate: (ctx): Maybe<Contact> => {
                 const contact = (ctx.message ?? ctx.channelPost)?.contact;
@@ -226,6 +248,7 @@ export class ConversationForm<C extends Context> {
     }
     async dice(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-dice",
             ...options,
             validate: (ctx): Maybe<Dice> => {
                 const dice = (ctx.message ?? ctx.channelPost)?.dice;
@@ -236,6 +259,7 @@ export class ConversationForm<C extends Context> {
     }
     async game(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-game",
             ...options,
             validate: (ctx): Maybe<Game> => {
                 const game = (ctx.message ?? ctx.channelPost)?.game;
@@ -246,6 +270,7 @@ export class ConversationForm<C extends Context> {
     }
     async poll(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-poll",
             ...options,
             validate: (ctx): Maybe<Poll> => {
                 const poll = (ctx.message ?? ctx.channelPost)?.poll;
@@ -256,6 +281,7 @@ export class ConversationForm<C extends Context> {
     }
     async venue(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-venue",
             ...options,
             validate: (ctx): Maybe<Venue> => {
                 const venue = (ctx.message ?? ctx.channelPost)?.venue;
@@ -266,6 +292,7 @@ export class ConversationForm<C extends Context> {
     }
     async location(options?: FormOptions<C>) {
         return await this.build({
+            collationKey: "form-location",
             ...options,
             validate: (ctx): Maybe<Location> => {
                 const location = (ctx.message ?? ctx.channelPost)?.location;

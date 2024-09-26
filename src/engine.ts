@@ -14,12 +14,12 @@ export interface ReplayControls {
     cancel(message?: unknown): Promise<never>;
     action<R = unknown>(
         fn: () => R | Promise<R>,
-        key?: string,
+        key: string,
     ): Promise<R>;
 }
 export type Builder = (controls: ReplayControls) => void | Promise<void>;
 
-export type ReplayResult = Returned | Thrown | Interrupted;
+export type ReplayResult = Returned | Thrown | Interrupted | Canceled;
 export interface Returned {
     type: "returned";
     returnValue: unknown;
@@ -30,9 +30,12 @@ export interface Thrown {
 }
 export interface Interrupted {
     type: "interrupted";
-    message?: unknown;
     state: ReplayState;
     interrupts: number[];
+}
+export interface Canceled {
+    type: "canceled";
+    message?: unknown;
 }
 
 export class ReplayEngine {
@@ -46,10 +49,10 @@ export class ReplayEngine {
         return await replayState(this.builder, state);
     }
 
-    static open() {
+    static open(payload: string) {
         const state = create();
         const mut = mutate(state);
-        const int = mut.op();
+        const int = mut.op(payload);
         return [state, int] as const;
     }
     static supply(state: ReplayState, interrupt: number, value: unknown) {
@@ -74,7 +77,6 @@ async function replayState(
     // Set up interrupt and action tracking
     let interrupted = false;
     const interrupts: number[] = [];
-    let message: unknown = undefined;
     let boundary = resolver();
     const actions = new Set<number>();
     function updateBoundary() {
@@ -94,8 +96,6 @@ async function replayState(
     // premature returns with floating promises
     let promises = 0; // counts the number of promises on the event loop
     let dirty = resolver(); // resolves as soon as the event loop is clear
-    let returned = false;
-    let returnValue: unknown = undefined;
     let complete = false; // locks the engine after the event loop has cleared
     function begin() {
         if (complete) {
@@ -117,6 +117,12 @@ async function replayState(
         }
     }
 
+    // Collect data to return to caller
+    let canceled = false;
+    let message: unknown = undefined;
+    let returned = false;
+    let returnValue: unknown = undefined;
+
     // Define replay controls
     async function interrupt(key: string) {
         if (returned || (interrupted && interrupts.length === 0)) {
@@ -126,7 +132,6 @@ async function replayState(
         begin();
         const res = await cur.perform(async (op) => {
             interrupted = true;
-            message = key;
             interrupts.push(op);
             updateBoundary();
             await boom();
@@ -134,13 +139,14 @@ async function replayState(
         end();
         return res;
     }
-    async function cancel(key?: string) {
+    async function cancel(key?: unknown) {
+        canceled = true;
         interrupted = true;
         message = key;
         updateBoundary();
         return await boom();
     }
-    async function action<R>(fn: () => R | Promise<R>, key?: string) {
+    async function action<R>(fn: () => R | Promise<R>, key: string) {
         begin();
         const res = await cur.perform(async (op) => {
             actions.add(op);
@@ -172,7 +178,11 @@ async function replayState(
         if (returned) {
             return { type: "returned", returnValue };
         } else if (boundary.isResolved()) {
-            return { type: "interrupted", message, state, interrupts };
+            if (canceled) {
+                return { type: "canceled", message };
+            } else {
+                return { type: "interrupted", state, interrupts };
+            }
         } else {
             throw new Error("Neither returned nor interrupted!"); // should never happen
         }

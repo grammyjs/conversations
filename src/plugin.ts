@@ -330,7 +330,7 @@ export function conversations<OC extends Context, C extends Context>(
 }
 
 export interface ConversationState {
-    args: string;
+    args?: string;
     replay: ReplayState;
     interrupts: number[];
 }
@@ -489,10 +489,10 @@ export type EnterResult =
 export type EnterComplete = ConversationComplete;
 export type EnterError = ConversationError;
 export interface EnterHandled extends ConversationHandled {
-    args: string;
+    args?: string;
 }
 export interface EnterSkipped extends ConversationSkipped {
-    args: string;
+    args?: string;
     replay: ReplayState;
     interrupts: number[];
 }
@@ -506,8 +506,8 @@ export async function enterConversation<C extends Context>(
     options?: EnterOptions<C>,
 ): Promise<EnterResult> {
     const { args = [], ...opts } = options ?? {};
-    const packedArgs = JSON.stringify(args);
-    const [initialState, int] = ReplayEngine.open();
+    const packedArgs = args.length === 0 ? undefined : JSON.stringify(args);
+    const [initialState, int] = ReplayEngine.open("wait");
     const state: ConversationState = {
         args: packedArgs,
         replay: initialState,
@@ -544,7 +544,7 @@ export async function resumeConversation<C extends Context>(
     options?: ResumeOptions<C>,
 ): Promise<ConversationResult> {
     const { update, api, me } = base;
-    const args = JSON.parse(state.args);
+    const args = state.args === undefined ? [] : JSON.parse(state.args);
     const {
         ctx = youTouchYouDie<C>(
             "The conversation was advanced from an event so there is no access to an outside context object",
@@ -586,10 +586,17 @@ export async function resumeConversation<C extends Context>(
                 // tell caller that an error was thrown, it should leave the
                 // conversation and rethrow the error
                 return { status: "error", error: result.error };
+            case "interrupted":
+                // tell caller that we handled the update and updated the state
+                return {
+                    status: "handled",
+                    replay: result.state,
+                    interrupts: result.interrupts,
+                };
             // TODO: disable lint until the following issue is fixed:
             // https://github.com/denoland/deno_lint/issues/1331
             // deno-lint-ignore no-fallthrough
-            case "interrupted":
+            case "canceled":
                 // check the type of interrupt by inspecting its message
                 switch (result.message) {
                     case "skip":
@@ -611,18 +618,11 @@ export async function resumeConversation<C extends Context>(
                         // tell the called that we are done and that downstream
                         // middleware must be called
                         return { status: "complete", proceed: true };
-                    case undefined:
-                        // tell caller that we handled the update and updated the state
-                        return {
-                            status: "handled",
-                            replay: result.state,
-                            interrupts: result.interrupts,
-                        };
                     default:
-                        throw new Error("never"); // cannot happen
+                        throw new Error("invalid cancel message received"); // cannot happen
                 }
             default:
-                throw new Error("never"); // cannot happen
+                throw new Error("engine returned invalid replay result type"); // cannot happen
         }
     }
     // tell caller that we want to skip the update and did not modify the state
@@ -660,7 +660,7 @@ function hydrateContext<C extends Context>(
                     }
                 }
             }
-            const ret = await controls.action(action);
+            const ret = await controls.action(action, method);
             // Recover values after loading them
             if (ret.ok) {
                 return ret.res;
