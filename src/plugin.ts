@@ -11,6 +11,7 @@ import {
     type UserFromGetMe,
 } from "./deps.deno.ts";
 import {
+    type Checkpoint,
     type ReplayControls,
     ReplayEngine,
     type ReplayState,
@@ -574,56 +575,68 @@ export async function resumeConversation<C extends Context>(
     // skip the update (actually handles it in a meaningful way).
     const ints = state.interrupts;
     const len = ints.length;
-    for (let i = 0; i < len; i++) {
+    INTERRUPTS: for (let i = 0; i < len; i++) {
         const int = ints[i];
         const checkpoint = ReplayEngine.supply(replayState, int, update);
-        const result = await engine.replay(replayState);
-        switch (result.type) {
-            case "returned":
-                // tell caller that we are done, all good
-                return { status: "complete", proceed: false };
-            case "thrown":
-                // tell caller that an error was thrown, it should leave the
-                // conversation and rethrow the error
-                return { status: "error", error: result.error };
-            case "interrupted":
-                // tell caller that we handled the update and updated the state
-                return {
-                    status: "handled",
-                    replay: result.state,
-                    interrupts: result.interrupts,
-                };
-            // TODO: disable lint until the following issue is fixed:
-            // https://github.com/denoland/deno_lint/issues/1331
-            // deno-lint-ignore no-fallthrough
-            case "canceled":
-                // check the type of interrupt by inspecting its message
-                switch (result.message) {
-                    case "skip":
-                        // current interrupt was skipped, replay again with the next
-                        ReplayEngine.reset(replayState, checkpoint);
-                        continue;
-                    case "drop":
-                        // drop the update, do not modify the state
-                        ReplayEngine.reset(replayState, checkpoint);
-                        return {
-                            status: "handled",
-                            replay: replayState,
-                            interrupts: ints,
-                        };
-                    case "halt":
-                        // tell caller that we are done, all good
-                        return { status: "complete", proceed: false };
-                    case "kill":
-                        // tell the called that we are done and that downstream
-                        // middleware must be called
-                        return { status: "complete", proceed: true };
-                    default:
-                        throw new Error("invalid cancel message received"); // cannot happen
-                }
-            default:
-                throw new Error("engine returned invalid replay result type"); // cannot happen
-        }
+        let rewind: boolean;
+        do {
+            rewind = false;
+            const result = await engine.replay(replayState);
+            switch (result.type) {
+                case "returned":
+                    // tell caller that we are done, all good
+                    return { status: "complete", proceed: false };
+                case "thrown":
+                    // tell caller that an error was thrown, it should leave the
+                    // conversation and rethrow the error
+                    return { status: "error", error: result.error };
+                case "interrupted":
+                    // tell caller that we handled the update and updated the state
+                    return {
+                        status: "handled",
+                        replay: result.state,
+                        interrupts: result.interrupts,
+                    };
+                // TODO: disable lint until the following issue is fixed:
+                // https://github.com/denoland/deno_lint/issues/1331
+                // deno-lint-ignore no-fallthrough
+                case "canceled":
+                    // check the type of interrupt by inspecting its message
+                    if (Array.isArray(result.message)) {
+                        const c = result.message as Checkpoint;
+                        ReplayEngine.reset(replayState, c);
+                        rewind = true;
+                        break;
+                    }
+                    switch (result.message) {
+                        case "skip":
+                            // current interrupt was skipped, replay again with the next
+                            ReplayEngine.reset(replayState, checkpoint);
+                            continue INTERRUPTS;
+                        case "drop":
+                            // drop the update, do not modify the state
+                            ReplayEngine.reset(replayState, checkpoint);
+                            return {
+                                status: "handled",
+                                replay: replayState,
+                                interrupts: ints,
+                            };
+                        case "halt":
+                            // tell caller that we are done, all good
+                            return { status: "complete", proceed: false };
+                        case "kill":
+                            // tell the called that we are done and that downstream
+                            // middleware must be called
+                            return { status: "complete", proceed: true };
+                        default:
+                            throw new Error("invalid cancel message received"); // cannot happen
+                    }
+                default:
+                    throw new Error(
+                        "engine returned invalid replay result type",
+                    ); // cannot happen
+            }
+        } while (rewind);
     }
     // tell caller that we want to skip the update and did not modify the state
     return { status: "skipped" };

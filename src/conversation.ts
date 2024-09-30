@@ -13,7 +13,7 @@ import {
     type Update,
     type User,
 } from "./deps.deno.ts";
-import { type ReplayControls } from "./engine.ts";
+import { type Checkpoint, type ReplayControls } from "./engine.ts";
 import { ConversationForm } from "./form.ts";
 type MaybeArray<T> = T | T[];
 export type StringWithCommandSuggestions =
@@ -112,12 +112,12 @@ First return your data from `external` and then resume update handling using `wa
         await this.options.onHalt?.();
         return await this.controls.cancel(options?.proceed ? "kill" : "halt");
     }
-    // checkpoint(): Checkpoint {
-    //     return this.controls.checkpoint();
-    // }
-    // async rewind(checkpoint: Checkpoint): Promise<never> {
-    //     return await this.controls.cancel(checkpoint);
-    // }
+    checkpoint(): Checkpoint {
+        return this.controls.checkpoint();
+    }
+    async rewind(checkpoint: Checkpoint): Promise<never> {
+        return await this.controls.cancel(checkpoint);
+    }
     // deno-lint-ignore no-explicit-any
     async external<OC extends Context, R, I = any>(
         op: ExternalOp<OC, R, I>["task"] | ExternalOp<OC, R, I>,

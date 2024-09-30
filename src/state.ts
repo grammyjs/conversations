@@ -114,5 +114,9 @@ export function cursor(state: ReplayState) {
         return await done(index, () => action(index));
     }
 
-    return { perform, op, done };
+    function checkpoint(): Checkpoint {
+        return [send, receive];
+    }
+
+    return { perform, op, done, checkpoint };
 }

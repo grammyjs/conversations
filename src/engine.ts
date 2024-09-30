@@ -16,6 +16,7 @@ export interface ReplayControls {
         fn: () => R | Promise<R>,
         key: string,
     ): Promise<R>;
+    checkpoint(): Checkpoint;
 }
 export type Builder = (controls: ReplayControls) => void | Promise<void>;
 
@@ -158,7 +159,10 @@ async function replayState(
         end();
         return res;
     }
-    const controls: ReplayControls = { interrupt, cancel, action };
+    function checkpoint() {
+        return cur.checkpoint();
+    }
+    const controls: ReplayControls = { interrupt, cancel, action, checkpoint };
 
     // Perform replay
     async function run() {
