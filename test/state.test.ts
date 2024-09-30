@@ -1,5 +1,11 @@
 import { resolver } from "../src/resolve.ts";
-import { create, cursor, inspect, mutate } from "../src/state.ts";
+import {
+    type Checkpoint,
+    create,
+    cursor,
+    inspect,
+    mutate,
+} from "../src/state.ts";
 import {
     assertEquals,
     assertInstanceOf,
@@ -130,6 +136,25 @@ describe("cursor", () => {
         await assertRejects(() => cur.done(-1, () => "result"));
         await assertRejects(() => cur.done(3, () => "result"));
         assertEquals(await cur.done(op0, () => "result"), "result");
+    });
+    it("supports checkpoints", async () => {
+        const state = create();
+        const cur = cursor(state);
+        const op0 = cur.op("x");
+        const op1 = cur.op("y");
+        let c: Checkpoint | undefined = undefined;
+        await cur.done(op0, () => {
+            c = cur.checkpoint();
+            return "result";
+        });
+        assertEquals(c, [2, 0]);
+        assertEquals(cur.checkpoint(), [2, 1]);
+        await cur.done(op1, () => {
+            c = cur.checkpoint();
+            return "result";
+        });
+        assertEquals(c, [2, 1]);
+        assertEquals(cur.checkpoint(), [2, 2]);
     });
     it("can start with existing state", async () => {
         const state = create();

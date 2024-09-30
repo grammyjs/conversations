@@ -105,7 +105,6 @@ export function cursor(state: ReplayState) {
         notify();
         return data;
     }
-
     async function perform(
         action: (op: number) => unknown | Promise<unknown>,
         payload: string,
@@ -113,7 +112,6 @@ export function cursor(state: ReplayState) {
         const index = op(payload);
         return await done(index, () => action(index));
     }
-
     function checkpoint(): Checkpoint {
         return [send, receive];
     }

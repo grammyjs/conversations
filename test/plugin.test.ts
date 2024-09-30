@@ -1273,6 +1273,27 @@ describe("createConversation", () => {
         assertEquals(j, 1);
         assertEquals(k, 0);
     });
+    it("should support checkpoints", async () => {
+        const mw = new Composer<TestContext>();
+        const plugin = conversations();
+        let i = 0;
+        let j = 0;
+        const convo = createConversation(async (c) => {
+            j++;
+            await c.external(() => i++);
+            const check = c.checkpoint();
+            await c.external(() => i++);
+            if (j === 1) {
+                await c.rewind(check);
+                i = -1; // never
+            }
+            await c.external(() => i++);
+        }, "convo");
+        mw.use(plugin, convo, (ctx) => ctx.conversation.enter("convo"));
+        await mw.middleware()(mkctx(), next);
+        assertEquals(i, 4);
+        assertEquals(j, 2);
+    });
 });
 
 describe("enterConversation and resumeConversation", () => {
