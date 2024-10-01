@@ -362,12 +362,13 @@ function makeAndCombiner(
         const ext: AndExtension<C> = {
             and(
                 predicate: (ctx: C) => boolean | Promise<boolean>,
-                opts: AndOtherwiseOptions<C>,
+                opts: AndOtherwiseOptions<C> = {},
             ) {
+                const { otherwise, ...skipOptions } = opts;
                 return combineAnd(promise.then(async (ctx) => {
                     if (!await predicate(ctx)) {
-                        await opts.otherwise?.(ctx);
-                        await conversation.skip({ drop: opts.drop });
+                        await otherwise?.(ctx);
+                        await conversation.skip(skipOptions);
                     }
                     return ctx;
                 }));
