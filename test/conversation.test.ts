@@ -555,8 +555,8 @@ describe("Conversation", () => {
         let i = 0;
         async function convo(conversation: Convo) {
             await conversation.external({
-                task: async () => {
-                    await assertRejects(() => conversation.wait());
+                task: () => {
+                    assertThrows(() => conversation.wait());
                     i++;
                 },
             });
@@ -572,7 +572,7 @@ describe("Conversation", () => {
         async function convo(conversation: Convo) {
             const rsr = resolver();
             const p = conversation.external(() => rsr.promise);
-            await assertRejects(() => conversation.wait());
+            assertThrows(() => conversation.wait());
             rsr.resolve();
             await p;
             i++;

@@ -49,10 +49,11 @@ export interface WaitOptions {
 export interface SkipOptions {
     drop?: boolean;
 }
-export interface OtherwiseOptions<C extends Context>
-    extends WaitOptions, SkipOptions {
+export interface AndOtherwiseOptions<C extends Context> extends SkipOptions {
     otherwise?: (ctx: C) => unknown | Promise<unknown>;
 }
+export interface OtherwiseOptions<C extends Context>
+    extends WaitOptions, AndOtherwiseOptions<C> {}
 
 export interface HaltOptions {
     proceed?: boolean;
@@ -61,6 +62,7 @@ export interface HaltOptions {
 export class Conversation<C extends Context = Context> {
     /** true if external is currently running, false otherwise */
     private insideExternal = false;
+    private combineAnd = makeAndCombiner(this);
     constructor(
         private controls: ReplayControls,
         private hydrate: (update: Update) => C,
@@ -69,40 +71,38 @@ export class Conversation<C extends Context = Context> {
         private options: ConversationHandleOptions,
     ) {}
     // TODO: add menus
-    // TODO: add checkpoints
-    // TODO: add all and any
-    async wait(
-        options: WaitOptions = {},
-    ): Promise<C> {
+    wait(options: WaitOptions = {}): AndPromise<C> {
         if (this.insideExternal) {
             throw new Error(
                 "Cannot wait for updates from inside `external`, or concurrently to it! \
 First return your data from `external` and then resume update handling using `wait` calls.",
             );
         }
-
-        const limit = "maxMilliseconds" in options
-            ? options.maxMilliseconds
-            : this.options.maxMillisecondsToWait;
-        const key = options.collationKey ?? "wait";
-        const before = limit !== undefined && await this.now();
-        const update = await this.controls.interrupt(key) as Update;
-        if (before !== false) {
-            const after = await this.now();
-            if (after - before >= limit) {
-                await this.halt({ proceed: true });
+        const makeWait = async () => {
+            const limit = "maxMilliseconds" in options
+                ? options.maxMilliseconds
+                : this.options.maxMillisecondsToWait;
+            const key = options.collationKey ?? "wait";
+            const before = limit !== undefined && await this.now();
+            const update = await this.controls.interrupt(key) as Update;
+            if (before !== false) {
+                const after = await this.now();
+                if (after - before >= limit) {
+                    await this.halt({ proceed: true });
+                }
             }
-        }
 
-        const ctx = this.hydrate(update);
-        let nextCalled = false;
-        await this.middleware(ctx, () => {
-            nextCalled = true;
-            return Promise.resolve();
-        });
-        // If a plugin decided to handle the update (did not call `next`), then
-        // we recurse and simply wait for another update.
-        return nextCalled ? ctx : await this.wait(options);
+            const ctx = this.hydrate(update);
+            let nextCalled = false;
+            await this.middleware(ctx, () => {
+                nextCalled = true;
+                return Promise.resolve();
+            });
+            // If a plugin decided to handle the update (did not call `next`), then
+            // we recurse and simply wait for another update.
+            return nextCalled ? ctx : await this.wait(options);
+        };
+        return this.combineAnd(makeWait());
     }
     async skip(options: SkipOptions = {}): Promise<never> {
         const drop = "drop" in options ? options.drop : this.options.seal;
@@ -182,113 +182,236 @@ First return your data from `external` and then resume update handling using `wa
         await this.external(() => console.error(...data));
     }
 
-    async waitUntil<D extends C>(
+    waitUntil<D extends C>(
         predicate: (ctx: C) => ctx is D,
         opts?: OtherwiseOptions<C>,
-    ): Promise<D>;
-    async waitUntil(
+    ): AndPromise<D>;
+    waitUntil(
         predicate: (ctx: C) => boolean | Promise<boolean>,
         opts?: OtherwiseOptions<C>,
-    ): Promise<C>;
-    async waitUntil(
+    ): AndPromise<C>;
+    waitUntil(
         predicate: (ctx: C) => boolean | Promise<boolean>,
         opts: OtherwiseOptions<C> = {},
-    ): Promise<C> {
-        const { otherwise, drop, ...waitOptions } = opts;
-        const ctx = await this.wait({ collationKey: "until", ...waitOptions });
-        if (!await predicate(ctx)) {
-            await otherwise?.(ctx);
-            await this.skip({ drop });
-        }
-        return ctx;
+    ): AndPromise<C> {
+        const makeWait = async () => {
+            const { otherwise, drop, ...waitOptions } = opts;
+            const ctx = await this.wait({
+                collationKey: "until",
+                ...waitOptions,
+            });
+            if (!await predicate(ctx)) {
+                await otherwise?.(ctx);
+                await this.skip({ drop });
+            }
+            return ctx;
+        };
+        return this.combineAnd(makeWait());
     }
-    async waitUnless(
+    waitUnless(
         predicate: (ctx: C) => boolean | Promise<boolean>,
         opts?: OtherwiseOptions<C>,
-    ): Promise<C> {
-        return await this.waitUntil(async (ctx) => !await predicate(ctx), {
-            collationKey: "unless",
-            ...opts,
-        });
-    }
-    async waitFor<Q extends FilterQuery>(
-        query: Q | Q[],
-        opts?: OtherwiseOptions<C>,
-    ): Promise<Filter<C, Q>> {
-        return await this.waitUntil(Context.has.filterQuery(query), {
-            collationKey: Array.isArray(query) ? query.join(",") : query,
-            ...opts,
-        });
-    }
-    async waitForHears(
-        trigger: MaybeArray<string | RegExp>,
-        opts?: OtherwiseOptions<C>,
-    ): Promise<HearsContext<C>> {
-        return await this.waitUntil(Context.has.text(trigger), {
-            collationKey: "hears",
-            ...opts,
-        });
-    }
-    async waitForCommand(
-        command: MaybeArray<StringWithCommandSuggestions>,
-        opts?: OtherwiseOptions<C>,
-    ): Promise<CommandContext<C>> {
-        return await this.waitUntil(Context.has.command(command), {
-            collationKey: "command",
-            ...opts,
-        });
-    }
-    async waitForReaction(
-        reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
-        opts?: OtherwiseOptions<C>,
-    ): Promise<ReactionContext<C>> {
-        return await this.waitUntil(Context.has.reaction(reaction), {
-            collationKey: "reaction",
-            ...opts,
-        });
-    }
-    async waitForCallbackQuery(
-        trigger: MaybeArray<string | RegExp>,
-        opts?: OtherwiseOptions<C>,
-    ): Promise<CallbackQueryContext<C>> {
-        return await this.waitUntil(Context.has.callbackQuery(trigger), {
-            collationKey: "callback",
-            ...opts,
-        });
-    }
-    async waitForGameQuery(
-        trigger: MaybeArray<string | RegExp>,
-        opts?: OtherwiseOptions<C>,
-    ): Promise<GameQueryContext<C>> {
-        return await this.waitUntil(Context.has.gameQuery(trigger), {
-            collationKey: "game",
-            ...opts,
-        });
-    }
-    async waitFrom(
-        user: number | User,
-        opts?: OtherwiseOptions<C>,
-    ): Promise<C & { from: User }> {
-        const id = typeof user === "number" ? user : user.id;
-        return await this.waitUntil(
-            (ctx: C): ctx is C & { from: User } => ctx.from?.id === id,
-            { collationKey: `from-${id}`, ...opts },
+    ): AndPromise<C> {
+        return this.combineAnd(
+            this.waitUntil(async (ctx) => !await predicate(ctx), {
+                collationKey: "unless",
+                ...opts,
+            }),
         );
     }
-    async waitForReplyTo(
+    waitFor<Q extends FilterQuery>(
+        query: Q | Q[],
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<Filter<C, Q>> {
+        return this.combineAnd(
+            this.waitUntil(Context.has.filterQuery(query), {
+                collationKey: Array.isArray(query) ? query.join(",") : query,
+                ...opts,
+            }),
+        );
+    }
+    waitForHears(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<HearsContext<C>> {
+        return this.combineAnd(this.waitUntil(Context.has.text(trigger), {
+            collationKey: "hears",
+            ...opts,
+        }));
+    }
+    waitForCommand(
+        command: MaybeArray<StringWithCommandSuggestions>,
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<CommandContext<C>> {
+        return this.combineAnd(this.waitUntil(Context.has.command(command), {
+            collationKey: "command",
+            ...opts,
+        }));
+    }
+    waitForReaction(
+        reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<ReactionContext<C>> {
+        return this.combineAnd(this.waitUntil(Context.has.reaction(reaction), {
+            collationKey: "reaction",
+            ...opts,
+        }));
+    }
+    waitForCallbackQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<CallbackQueryContext<C>> {
+        return this.combineAnd(
+            this.waitUntil(Context.has.callbackQuery(trigger), {
+                collationKey: "callback",
+                ...opts,
+            }),
+        );
+    }
+    waitForGameQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<GameQueryContext<C>> {
+        return this.combineAnd(this.waitUntil(Context.has.gameQuery(trigger), {
+            collationKey: "game",
+            ...opts,
+        }));
+    }
+    waitFrom(
+        user: number | User,
+        opts?: OtherwiseOptions<C>,
+    ): AndPromise<C & { from: User }> {
+        const id = typeof user === "number" ? user : user.id;
+        return this.combineAnd(this.waitUntil(
+            (ctx: C): ctx is C & { from: User } => ctx.from?.id === id,
+            { collationKey: `from-${id}`, ...opts },
+        ));
+    }
+    waitForReplyTo(
         message_id: number | { message_id: number },
         opts?: OtherwiseOptions<C>,
-    ): Promise<Filter<C, "message" | "channel_post">> {
+    ): AndPromise<Filter<C, "message" | "channel_post">> {
         const id = typeof message_id === "number"
             ? message_id
             : message_id.message_id;
-        return await this.waitUntil(
+        return this.combineAnd(this.waitUntil(
             (ctx): ctx is Filter<C, "message" | "channel_post"> =>
                 ctx.message?.reply_to_message?.message_id === id ||
                 ctx.channelPost?.reply_to_message?.message_id === id,
             { collationKey: `reply-${id}`, ...opts },
-        );
+        ));
     }
 
     form = new ConversationForm(this);
+}
+
+export type AndPromise<C extends Context> = Promise<C> & AndExtension<C>;
+export interface AndExtension<C extends Context> {
+    and<D extends C>(
+        predicate: (ctx: C) => ctx is D,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<D>;
+    and(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<C>;
+    unless(
+        predicate: (ctx: C) => boolean | Promise<boolean>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<C>;
+    andFor<Q extends FilterQuery>(
+        query: Q | Q[],
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<Filter<C, Q>>;
+    andForHears(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<HearsContext<C>>;
+    andForCommand(
+        command: MaybeArray<StringWithCommandSuggestions>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<CommandContext<C>>;
+    andForReaction(
+        reaction: MaybeArray<ReactionTypeEmoji["emoji"] | ReactionType>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<ReactionContext<C>>;
+    andForCallbackQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<CallbackQueryContext<C>>;
+    andForGameQuery(
+        trigger: MaybeArray<string | RegExp>,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<GameQueryContext<C>>;
+    andFrom(
+        user: number | User,
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<C & { from: User }>;
+    andForReplyTo(
+        message_id: number | { message_id: number },
+        opts?: AndOtherwiseOptions<C>,
+    ): AndPromise<Filter<C, "message" | "channel_post">>;
+}
+
+function makeAndCombiner(
+    conversation: { skip: (opts: SkipOptions) => Promise<never> },
+) {
+    return function combineAnd<C extends Context>(
+        promise: Promise<C>,
+    ): AndPromise<C> {
+        const ext: AndExtension<C> = {
+            and(
+                predicate: (ctx: C) => boolean | Promise<boolean>,
+                opts: AndOtherwiseOptions<C>,
+            ) {
+                return combineAnd(promise.then(async (ctx) => {
+                    if (!await predicate(ctx)) {
+                        await opts.otherwise?.(ctx);
+                        await conversation.skip({ drop: opts.drop });
+                    }
+                    return ctx;
+                }));
+            },
+            unless(predicate, opts) {
+                return ext.and(async (ctx) => !await predicate(ctx), opts);
+            },
+            andFor(query, opts) {
+                return ext.and(Context.has.filterQuery(query), opts);
+            },
+            andForHears(trigger, opts) {
+                return ext.and(Context.has.text(trigger), opts);
+            },
+            andForCommand(command, opts) {
+                return ext.and(Context.has.command(command), opts);
+            },
+            andForReaction(reaction, opts) {
+                return ext.and(Context.has.reaction(reaction), opts);
+            },
+            andForCallbackQuery(trigger, opts) {
+                return ext.and(Context.has.callbackQuery(trigger), opts);
+            },
+            andForGameQuery(trigger, opts) {
+                return ext.and(Context.has.gameQuery(trigger), opts);
+            },
+            andFrom(user, opts) {
+                const id = typeof user === "number" ? user : user.id;
+                return ext.and(
+                    (ctx): ctx is C & { from: User } => ctx.from?.id === id,
+                    opts,
+                );
+            },
+            andForReplyTo(message_id, opts) {
+                const id = typeof message_id === "number"
+                    ? message_id
+                    : message_id.message_id;
+                return ext.and(
+                    (ctx): ctx is Filter<C, "message" | "channel_post"> =>
+                        ctx.message?.reply_to_message?.message_id === id ||
+                        ctx.channelPost?.reply_to_message?.message_id === id,
+                    opts,
+                );
+            },
+        };
+        return Object.assign(promise, ext);
+    };
 }
