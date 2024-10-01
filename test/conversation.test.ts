@@ -582,6 +582,83 @@ describe("Conversation", () => {
         assertEquals(result.status, "complete");
         assertEquals(i, 1);
     });
+    it("should support filtered wait calls", async () => {
+        const chat = {
+            id: 3,
+            type: "private" as const,
+            first_name: "dev",
+        };
+        const from = {
+            id: 4,
+            first_name: "dev",
+            is_bot: false,
+        };
+        const forward_origin = {
+            type: "channel" as const,
+            chat: { type: "channel" as const, id: -12, title: "grammY news" },
+            date: 1,
+            message_id: 31415,
+        };
+        const drop: Update = {
+            update_id: 1729,
+            message: {
+                message_id: 42,
+                chat,
+                date: Date.now(),
+                from,
+                forward_origin,
+                text: "/start",
+                entities: [{
+                    type: "bot_command",
+                    offset: 0,
+                    length: "/start".length,
+                }],
+            },
+        };
+        const pass: Update = {
+            update_id: 1730,
+            message: {
+                message_id: 43,
+                chat,
+                date: Date.now(),
+                from,
+                forward_origin,
+                text: "YaY",
+                entities: [{ type: "bold", offset: 1, length: 1 }],
+            },
+        };
+        let i = 0;
+        let j = 0;
+        async function convo(conversation: Convo) {
+            const ctx = await conversation.waitFor("message:text")
+                .andFor(":forward_origin")
+                .unless(Context.has.command("start"), {
+                    otherwise: (ctx) => {
+                        assertEquals(ctx.update, drop);
+                        j++;
+                    },
+                });
+            assertEquals(ctx.update, pass);
+            i++;
+        }
+        const first = await enterConversation(convo, mkctx());
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const args = first.args;
+        const state = {
+            args,
+            replay: first.replay,
+            interrupts: first.interrupts,
+        };
+        let res = await resumeConversation(convo, mkctx(drop), state);
+        assertEquals(res.status, "skipped");
+        assert(res.status === "skipped");
+        res = await resumeConversation(convo, mkctx(pass), state);
+        assertEquals(res.status, "complete");
+        assert(res.status === "complete");
+        assertEquals(i, 1);
+        assertEquals(j, 1);
+    });
     it("should support loops and functions and more", async () => {
         let j = 0;
         async function convo(conversation: Convo, ctx: Context) {
