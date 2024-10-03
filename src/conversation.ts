@@ -15,6 +15,7 @@ import {
 } from "./deps.deno.ts";
 import { type Checkpoint, type ReplayControls } from "./engine.ts";
 import { ConversationForm } from "./form.ts";
+import { ConversationMenuPool } from "./menu.ts";
 type MaybeArray<T> = T | T[];
 export type StringWithCommandSuggestions =
     | (string & Record<never, never>)
@@ -62,6 +63,9 @@ export interface HaltOptions {
 export class Conversation<C extends Context = Context> {
     /** true if external is currently running, false otherwise */
     private insideExternal = false;
+
+    private menuPool = new ConversationMenuPool(this);
+
     private combineAnd = makeAndCombiner(this);
     constructor(
         private controls: ReplayControls,
@@ -70,7 +74,6 @@ export class Conversation<C extends Context = Context> {
         private middleware: MiddlewareFn<C>,
         private options: ConversationHandleOptions,
     ) {}
-    // TODO: add menus
     wait(options: WaitOptions = {}): AndPromise<C> {
         if (this.insideExternal) {
             throw new Error(
@@ -79,6 +82,7 @@ First return your data from `external` and then resume update handling using `wa
             );
         }
         const makeWait = async () => {
+            // obtain update
             const limit = "maxMilliseconds" in options
                 ? options.maxMilliseconds
                 : this.options.maxMillisecondsToWait;
@@ -92,15 +96,26 @@ First return your data from `external` and then resume update handling using `wa
                 }
             }
 
+            // convert to context object
             const ctx = this.hydrate(update);
-            let nextCalled = false;
+
+            // run plugins
+            let nextCalledPlugin = false;
             await this.middleware(ctx, () => {
-                nextCalled = true;
+                nextCalledPlugin = true;
                 return Promise.resolve();
             });
-            // If a plugin decided to handle the update (did not call `next`), then
-            // we recurse and simply wait for another update.
-            return nextCalled ? ctx : await this.wait(options);
+            // If a plugin decided to handle the update (did not call `next`),
+            // then we recurse and simply wait for another update.
+            if (!nextCalledPlugin) return await this.wait(options);
+
+            // run menus
+            const { next: nextCalledMenu } = await this.menuPool.handle(ctx);
+            // If a menu decided to handle the update (did not call `next`),
+            // then we recurse and simply wait for another update.
+            if (!nextCalledMenu) return await this.wait(options);
+
+            return ctx;
         };
         return this.combineAnd(makeWait());
     }
@@ -302,6 +317,9 @@ First return your data from `external` and then resume update handling using `wa
         ));
     }
 
+    menu(id?: string) {
+        return this.menuPool.create(id);
+    }
     form = new ConversationForm(this);
 }
 
