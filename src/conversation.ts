@@ -100,20 +100,20 @@ First return your data from `external` and then resume update handling using `wa
             const ctx = this.hydrate(update);
 
             // run plugins
-            let nextCalledPlugin = false;
+            let pluginsCalledNext = false;
             await this.middleware(ctx, () => {
-                nextCalledPlugin = true;
+                pluginsCalledNext = true;
                 return Promise.resolve();
             });
             // If a plugin decided to handle the update (did not call `next`),
             // then we recurse and simply wait for another update.
-            if (!nextCalledPlugin) return await this.wait(options);
+            if (!pluginsCalledNext) return await this.wait(options);
 
             // run menus
-            const { next: nextCalledMenu } = await this.menuPool.handle(ctx);
+            const { next: menuCalledNext } = await this.menuPool.handle(ctx);
             // If a menu decided to handle the update (did not call `next`),
             // then we recurse and simply wait for another update.
-            if (!nextCalledMenu) return await this.wait(options);
+            if (!menuCalledNext) return await this.wait(options);
 
             return ctx;
         };
