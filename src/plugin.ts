@@ -16,8 +16,10 @@ import {
     ReplayEngine,
     type ReplayState,
 } from "./engine.ts";
+import { type ConversationStorage, uniformStorage } from "./storage.ts";
 export { type Conversation } from "./conversation.ts";
 
+// TODO: merge some of these
 const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
 const internalIndex = Symbol("conversations.builders");
@@ -35,74 +37,11 @@ export interface ApiBaseData {
     options?: ApiClientOptions;
 }
 
-type MaybePromise<T> = T | Promise<T>;
-export type ConversationStorage<C extends Context> =
-    | ConversationContextStorage<C>
-    | ConversationKeyStorage<C>;
-export interface ConversationContextStorage<C extends Context> {
-    adapter?: never;
-
-    read(ctx: C): MaybePromise<ConversationData | undefined>;
-    write(ctx: C, state: ConversationData): MaybePromise<void>;
-    delete(ctx: C): MaybePromise<void>;
-}
-export interface ConversationKeyStorage<C extends Context> {
-    getStorageKey(ctx: C): string | undefined;
-    adapter: {
-        read(key: string): MaybePromise<ConversationData | undefined>;
-        write(key: string, state: ConversationData): MaybePromise<void>;
-        delete(key: string): MaybePromise<void>;
-    };
-
-    read?: never;
-    write?: never;
-    delete?: never;
-}
 export interface ConversationOptions<OC extends Context, C extends Context> {
-    storage?: ConversationStorage<OC>;
+    storage?: ConversationStorage<OC, ConversationData>;
     plugins?: Middleware<C>[];
-    onEnter?(id: string): MaybePromise<unknown>;
-    onExit?(id: string): MaybePromise<unknown>;
-}
-function defaultStorage<C extends Context>(): ConversationKeyStorage<C> {
-    const store = new Map<string, ConversationData>();
-    return {
-        getStorageKey: (ctx) => ctx.chatId?.toString(),
-        adapter: {
-            read: (key) => store.get(key),
-            write: (key, state) => void store.set(key, state),
-            delete: (key) => void store.delete(key),
-        },
-    };
-}
-function uniformStorage<C extends Context>(
-    storage: ConversationStorage<C> = defaultStorage(),
-) {
-    if ("getStorageKey" in storage) {
-        return (ctx: C) => {
-            const key = storage.getStorageKey(ctx);
-            return key === undefined
-                ? {
-                    read: () => undefined,
-                    write: () => undefined,
-                    delete: () => undefined,
-                }
-                : {
-                    read: () => storage.adapter.read(key),
-                    write: (state: ConversationData) =>
-                        storage.adapter.write(key, state),
-                    delete: () => storage.adapter.delete(key),
-                };
-        };
-    } else {
-        return (ctx: C) => {
-            return {
-                read: () => storage.read(ctx),
-                write: (state: ConversationData) => storage.write(ctx, state),
-                delete: () => storage.delete(ctx),
-            };
-        };
-    }
+    onEnter?(id: string): unknown | Promise<unknown>;
+    onExit?(id: string): unknown | Promise<unknown>;
 }
 export interface ConversationData {
     [id: string]: ConversationState[];
@@ -407,7 +346,7 @@ export function createConversation<OC extends Context, C extends Context>(
             maxMillisecondsToWait,
         });
         const onExit = ctx[internalExitHandler] as
-            | ((name: string) => MaybePromise<unknown>)
+            | ((name: string) => unknown | Promise<unknown>)
             | undefined;
         const onHalt = async () => {
             await onExit?.(id);
