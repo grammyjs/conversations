@@ -5,6 +5,23 @@ export interface VersionedState<S> {
     version: [typeof PLUGIN_DATA_VERSION, string | number];
     state: S;
 }
+export function pinVersion(version: string | number) {
+    function versionify<S>(state: S): VersionedState<S> {
+        return { version: [PLUGIN_DATA_VERSION, version], state };
+    }
+    function unpack<S>(data?: VersionedState<S>): S | undefined {
+        if (data === undefined) return undefined;
+        const [pluginVersion, dataVersion] = data.version;
+        if (dataVersion !== version) return undefined;
+        if (pluginVersion !== PLUGIN_DATA_VERSION) {
+            // In the future, we might want to migrate the data from an old
+            // plugin version to a new one here.
+            return undefined;
+        }
+        return data.state;
+    }
+    return { versionify, unpack };
+}
 
 export type MaybePromise<T> = T | Promise<T>;
 export type ConversationStorage<C extends Context, S> =
@@ -55,20 +72,7 @@ export function uniformStorage<C extends Context, S>(
     }
 
     const version = storage.version ?? 0;
-    function addVersion(state: S): VersionedState<S> {
-        return { version: [PLUGIN_DATA_VERSION, version], state };
-    }
-    function migrate(data?: VersionedState<S>): S | undefined {
-        if (data === undefined) return undefined;
-        const [pluginVersion, dataVersion] = data.version;
-        if (dataVersion !== version) return undefined;
-        if (pluginVersion !== PLUGIN_DATA_VERSION) {
-            // In the future, we might want to migrate the data from an old
-            // plugin version to a new one here.
-            return undefined;
-        }
-        return data.state;
-    }
+    const { versionify, unpack } = pinVersion(version);
 
     if (storage.type === "key") {
         const { getStorageKey, adapter } = storage;
@@ -81,8 +85,8 @@ export function uniformStorage<C extends Context, S>(
                     delete: () => undefined,
                 }
                 : {
-                    read: async () => migrate(await adapter.read(key)),
-                    write: (state: S) => adapter.write(key, addVersion(state)),
+                    read: async () => unpack(await adapter.read(key)),
+                    write: (state: S) => adapter.write(key, versionify(state)),
                     delete: () => adapter.delete(key),
                 };
         };
@@ -90,8 +94,8 @@ export function uniformStorage<C extends Context, S>(
         const { adapter } = storage;
         return (ctx: C) => {
             return {
-                read: async () => migrate(await adapter.read(ctx)),
-                write: (state: S) => adapter.write(ctx, addVersion(state)),
+                read: async () => unp(await adapter.read(ctx)),
+                write: (state: S) => adapter.write(ctx, versionify(state)),
                 delete: () => adapter.delete(ctx),
             };
         };
