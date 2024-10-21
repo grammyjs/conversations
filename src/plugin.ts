@@ -17,7 +17,8 @@ import {
     type ReplayState,
 } from "./engine.ts";
 import { type ConversationStorage, uniformStorage } from "./storage.ts";
-export { type Conversation } from "./conversation.ts";
+
+type MaybePromise<T> = T | Promise<T>;
 
 // TODO: merge some of these
 const internalRecursionDetection = Symbol("conversations.recursion");

@@ -94,7 +94,7 @@ export function uniformStorage<C extends Context, S>(
         const { adapter } = storage;
         return (ctx: C) => {
             return {
-                read: async () => unp(await adapter.read(ctx)),
+                read: async () => unpack(await adapter.read(ctx)),
                 write: (state: S) => adapter.write(ctx, versionify(state)),
                 delete: () => adapter.delete(ctx),
             };
