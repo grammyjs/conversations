@@ -8,36 +8,34 @@ export interface VersionedState<S> {
 
 export type MaybePromise<T> = T | Promise<T>;
 export type ConversationStorage<C extends Context, S> =
+    | { type?: never; version?: never } & VersionedStateStorage<string, S>
     | ConversationContextStorage<C, S>
     | ConversationKeyStorage<C, S>;
+export interface VersionedStateStorage<K, S> {
+    read(key: K): MaybePromise<VersionedState<S> | undefined>;
+    write(key: K, state: VersionedState<S>): MaybePromise<void>;
+    delete(key: K): MaybePromise<void>;
+}
 export interface ConversationContextStorage<C extends Context, S> {
     version?: string | number;
-
-    adapter?: never;
-
-    read(ctx: C): MaybePromise<VersionedState<S> | undefined>;
-    write(ctx: C, state: VersionedState<S>): MaybePromise<void>;
-    delete(ctx: C): MaybePromise<void>;
+    type: "context";
+    adapter: VersionedStateStorage<C, S>;
 }
 export interface ConversationKeyStorage<C extends Context, S> {
     version?: string | number;
-
+    type: "key";
     getStorageKey(ctx: C): string | undefined;
-    adapter: {
-        read(key: string): MaybePromise<VersionedState<S> | undefined>;
-        write(key: string, state: VersionedState<S>): MaybePromise<void>;
-        delete(key: string): MaybePromise<void>;
-    };
-
-    read?: never;
-    write?: never;
-    delete?: never;
+    adapter: VersionedStateStorage<string, S>;
 }
 
+function defaultStorageKey<C extends Context>(ctx: C): string | undefined {
+    return ctx.chatId?.toString();
+}
 function defaultStorage<C extends Context, S>(): ConversationKeyStorage<C, S> {
     const store = new Map<string, VersionedState<S>>();
     return {
-        getStorageKey: (ctx) => ctx.chatId?.toString(),
+        type: "key",
+        getStorageKey: defaultStorageKey,
         adapter: {
             read: (key) => store.get(key),
             write: (key, state) => void store.set(key, state),
@@ -48,6 +46,14 @@ function defaultStorage<C extends Context, S>(): ConversationKeyStorage<C, S> {
 export function uniformStorage<C extends Context, S>(
     storage: ConversationStorage<C, S> = defaultStorage(),
 ) {
+    if (storage.type === undefined) {
+        return uniformStorage({
+            type: "key",
+            getStorageKey: defaultStorageKey,
+            adapter: storage,
+        });
+    }
+
     const version = storage.version ?? 0;
     function addVersion(state: S): VersionedState<S> {
         return { version: [PLUGIN_DATA_VERSION, version], state };
@@ -64,9 +70,10 @@ export function uniformStorage<C extends Context, S>(
         return data.state;
     }
 
-    if ("getStorageKey" in storage) {
+    if (storage.type === "key") {
+        const { getStorageKey, adapter } = storage;
         return (ctx: C) => {
-            const key = storage.getStorageKey(ctx);
+            const key = getStorageKey(ctx);
             return key === undefined
                 ? {
                     read: () => undefined,
@@ -74,18 +81,18 @@ export function uniformStorage<C extends Context, S>(
                     delete: () => undefined,
                 }
                 : {
-                    read: async () => migrate(await storage.adapter.read(key)),
-                    write: (state: S) =>
-                        storage.adapter.write(key, addVersion(state)),
-                    delete: () => storage.adapter.delete(key),
+                    read: async () => migrate(await adapter.read(key)),
+                    write: (state: S) => adapter.write(key, addVersion(state)),
+                    delete: () => adapter.delete(key),
                 };
         };
     } else {
+        const { adapter } = storage;
         return (ctx: C) => {
             return {
-                read: async () => migrate(await storage.read(ctx)),
-                write: (state: S) => storage.write(ctx, addVersion(state)),
-                delete: () => storage.delete(ctx),
+                read: async () => migrate(await adapter.read(ctx)),
+                write: (state: S) => adapter.write(ctx, addVersion(state)),
+                delete: () => adapter.delete(ctx),
             };
         };
     }
