@@ -18,8 +18,6 @@ import {
 } from "./engine.ts";
 import { type ConversationStorage, uniformStorage } from "./storage.ts";
 
-type MaybePromise<T> = T | Promise<T>;
-
 // TODO: merge some of these
 const internalRecursionDetection = Symbol("conversations.recursion");
 const internalMutableState = Symbol("conversations.data");
@@ -474,7 +472,7 @@ export async function enterConversation<C extends Context>(
 export interface ResumeOptions<C extends Context> {
     ctx?: Context;
     plugins?: Middleware<C>[];
-    onHalt?: () => MaybePromise<void>;
+    onHalt?: () => void | Promise<void>;
     maxMillisecondsToWait?: number;
     seal?: boolean;
 }
