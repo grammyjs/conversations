@@ -304,7 +304,7 @@ function parseId(data: string) {
     if (data.startsWith("//")) {
         const [id, ...parts] = data.substring(2).split("/");
         if (!id || isNaN(parseInt(id, 36))) return undefined;
-        return { id, parts };
+        return { id: "//" + id, parts };
     } else {
         const [id, ...parts] = data.split("/");
         if (id === undefined) return undefined;
