@@ -513,10 +513,13 @@ export class ConversationMenuRange<C extends Context> {
 
 export class ConversationMenu<C extends Context>
     extends ConversationMenuRange<C> {
-    [opts]: MenuOptions<C>;
+    [opts]: Required<MenuOptions<C>>;
     constructor(public readonly id: string, options: MenuOptions<C> = {}) {
         super();
-        this[opts] = options;
+        this[opts] = {
+            autoAnswer: options.autoAnswer ?? true,
+            fingerprint: options.fingerprint ?? (() => ""),
+        };
     }
     public readonly inline_keyboard = youTouchYouDie<[]>(
         "Something went very wrong, how did you manage to run into this error?",
