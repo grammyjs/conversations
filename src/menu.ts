@@ -36,24 +36,16 @@ export type ButtonHandler<C extends Context> = (
     ctx: C,
 ) => unknown | Promise<unknown>;
 
-export interface MenuOptions<C extends Context> {
-    autoAnswer?: boolean;
-    fingerprint?: DynamicString<C>;
+export interface ConversationMenuOptions<C extends Context> {
+    parent?: string;
+    autoAnswer: boolean;
+    fingerprint: DynamicString<C>;
 }
 
 export class ConversationMenuPool<C extends Context> {
     private index: Map<string, ConversationMenu<C>> = new Map();
 
-    constructor(
-        private readonly conversation: {
-            wait: (
-                opts: { maxMilliseconds?: number; collationKey?: string },
-            ) => Promise<C>;
-            skip: (opts: { drop?: boolean }) => Promise<never>;
-        },
-    ) {}
-
-    create(id?: string) {
+    create(id?: string, options?: Partial<ConversationMenuOptions<C>>) {
         if (id === undefined) {
             id = createId(this.index.size);
         } else if (id.includes("/")) {
@@ -61,7 +53,7 @@ export class ConversationMenuPool<C extends Context> {
                 `You cannot use '/' in a menu identifier ('${id}')`,
             );
         }
-        const menu = new ConversationMenu<C>(id);
+        const menu = new ConversationMenu<C>(id, options);
         this.index.set(id, menu);
         return menu;
     }
@@ -209,22 +201,31 @@ export class ConversationMenuPool<C extends Context> {
             targetMenu = menu;
             if (immediate) await ctx.editMessageReplyMarkup();
         }
+        const lookup = (id: string) => {
+            const m = this.index.get(id);
+            if (m === undefined) {
+                const validIds = Array.from(this.index.keys())
+                    .map((k) => `'${k}'`)
+                    .join(", ");
+                throw new Error(
+                    `Menu '${id}' is not known! Known menus are: ${validIds}`,
+                );
+            }
+            return m;
+        };
         const controls: ConversationMenuControlPanel = {
             update: (config) => nav(config, menu),
             close: (config) => nav(config, undefined),
-            nav: async (to, config) => {
-                const m = this.index.get(to);
-                if (m === undefined) {
-                    const validIds = Array.from(this.index.keys())
-                        .map((k) => `'${k}'`)
-                        .join(", ");
-                    throw new Error(
-                        `Menu '${id}' is not known! Known submenus are: ${validIds}`,
-                    );
+            nav: (to, config) => nav(config, lookup(to)),
+            back: async (config) => {
+                const p = menu[opts].parent;
+                if (p === undefined) {
+                    // FIXME: this is thrown when it should not be thrown, we
+                    // likely have a bad menu reference
+                    throw new Error(`Menu ${menu.id} has no parent!`);
                 }
-                await nav(config, m);
+                await nav(config, lookup(p));
             },
-            back: (config) => nav(config, undefined /* previous menu */), // TODO: store history in pool
         };
         Object.assign(ctx, { menu: controls });
         // We now have prepared the context for being handled by `menu` so we
@@ -513,8 +514,11 @@ export class ConversationMenuRange<C extends Context> {
 
 export class ConversationMenu<C extends Context>
     extends ConversationMenuRange<C> {
-    [opts]: Required<MenuOptions<C>>;
-    constructor(public readonly id: string, options: MenuOptions<C> = {}) {
+    [opts]: ConversationMenuOptions<C>;
+    constructor(
+        public readonly id: string,
+        options: Partial<ConversationMenuOptions<C>> = {},
+    ) {
         super();
         this[opts] = {
             autoAnswer: options.autoAnswer ?? true,

@@ -15,7 +15,8 @@ import {
 } from "./deps.deno.ts";
 import { type Checkpoint, type ReplayControls } from "./engine.ts";
 import { ConversationForm } from "./form.ts";
-import { ConversationMenuPool } from "./menu.ts";
+import { type ConversationMenuOptions, ConversationMenuPool } from "./menu.ts";
+
 type MaybeArray<T> = T | T[];
 export type StringWithCommandSuggestions =
     | (string & Record<never, never>)
@@ -64,7 +65,7 @@ export class Conversation<C extends Context = Context> {
     /** true if external is currently running, false otherwise */
     private insideExternal = false;
 
-    private menuPool = new ConversationMenuPool(this);
+    private menuPool = new ConversationMenuPool<C>();
 
     private combineAnd = makeAndCombiner(this);
     constructor(
@@ -317,8 +318,8 @@ First return your data from `external` and then resume update handling using `wa
         ));
     }
 
-    menu(id?: string) {
-        return this.menuPool.create(id);
+    menu(id?: string, options?: Partial<ConversationMenuOptions<C>>) {
+        return this.menuPool.create(id, options);
     }
     form = new ConversationForm(this);
 }
