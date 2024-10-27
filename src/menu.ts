@@ -220,8 +220,6 @@ export class ConversationMenuPool<C extends Context> {
             back: async (config) => {
                 const p = menu[opts].parent;
                 if (p === undefined) {
-                    // FIXME: this is thrown when it should not be thrown, we
-                    // likely have a bad menu reference
                     throw new Error(`Menu ${menu.id} has no parent!`);
                 }
                 await nav(config, lookup(p));
@@ -521,6 +519,7 @@ export class ConversationMenu<C extends Context>
     ) {
         super();
         this[opts] = {
+            parent: options.parent,
             autoAnswer: options.autoAnswer ?? true,
             fingerprint: options.fingerprint ?? (() => ""),
         };
