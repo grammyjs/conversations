@@ -44,6 +44,31 @@ export interface ConversationMenuOptions<C extends Context> {
 
 export class ConversationMenuPool<C extends Context> {
     private index: Map<string, ConversationMenu<C>> = new Map();
+    private dirty: Map<
+        string | number,
+        Map<number, { menu: ConversationMenu<C> | undefined }>
+    > = new Map();
+
+    markMenuAsDirty(
+        chat_id: string | number,
+        message_id: number,
+        menu?: ConversationMenu<C>,
+    ) {
+        let chat = this.dirty.get(chat_id);
+        if (chat === undefined) {
+            chat = new Map();
+            this.dirty.set(chat_id, chat);
+        }
+        chat.set(message_id, { menu });
+    }
+    getAndClearDirtyMenu(chat_id: string | number, message_id: number) {
+        const chat = this.dirty.get(chat_id);
+        if (chat === undefined) return undefined;
+        const message = chat.get(message_id);
+        chat.delete(message_id);
+        if (chat.size === 0) this.dirty.delete(chat_id);
+        return message?.menu;
+    }
 
     create(id?: string, options?: Partial<ConversationMenuOptions<C>>) {
         if (id === undefined) {
@@ -58,7 +83,20 @@ export class ConversationMenuPool<C extends Context> {
         return menu;
     }
 
-    async handle(ctx: C): Promise<{ next: boolean }> {
+    lookup(id: string) {
+        const menu = this.index.get(id);
+        if (menu === undefined) {
+            const validIds = Array.from(this.index.keys())
+                .map((k) => `'${k}'`)
+                .join(", ");
+            throw new Error(
+                `Menu '${id}' is not known! Known menus are: ${validIds}`,
+            );
+        }
+        return menu;
+    }
+
+    install(ctx: C) {
         // === SETUP RENDERING ===
         /**
          * Renders a conversational menu to a button array.
@@ -68,57 +106,10 @@ export class ConversationMenuPool<C extends Context> {
         const render = async (id: string) => {
             const self = this.index.get(id);
             if (self === undefined) throw new Error("should never happen");
-            const renderer = createRenderer(
-                ctx,
-                async (btn, i, j): Promise<InlineKeyboardButton> => {
-                    const text = await uniform(ctx, btn.text);
-
-                    if ("url" in btn) {
-                        let { url, ...rest } = btn;
-                        url = await uniform(ctx, btn.url);
-                        return { ...rest, url, text };
-                    } else if ("middleware" in btn) {
-                        const row = i.toString(16);
-                        const col = j.toString(16);
-                        const payload = await uniform(ctx, btn.payload, "");
-                        if (payload.includes("/")) {
-                            throw new Error(
-                                `Could not render menu '${id}'! Payload must not contain a '/' character but was '${payload}'`,
-                            );
-                        }
-                        return {
-                            callback_data: `${id}/${row}/${col}/${payload}/`,
-                            text,
-                        };
-                    } else return { ...btn, text };
-                },
-            );
-            // Render button array
+            const renderer = createDisplayRenderer(id, ctx);
             const rendered = await renderer(self[ops]);
-            // Get shape of array
-            const lengths = [
-                rendered.length,
-                ...rendered.map((row) => row.length),
-            ];
-            // Generate fingerprint
             const fingerprint = await uniform(ctx, self[opts].fingerprint);
-            for (const row of rendered) {
-                for (const btn of row) {
-                    if ("callback_data" in btn) {
-                        // Inject hash values to detect keyboard changes
-                        let type: "h" | "f";
-                        let data: number[];
-                        if (fingerprint) {
-                            type = "f";
-                            data = toNums(fingerprint);
-                        } else {
-                            type = "h";
-                            data = [...lengths, ...toNums(btn.text)];
-                        }
-                        btn.callback_data += type + tinyHash(data);
-                    }
-                }
-            }
+            appendHashes(rendered, fingerprint);
             return rendered;
         };
         /**
@@ -135,34 +126,56 @@ export class ConversationMenuPool<C extends Context> {
         };
 
         // === HANDLE OUTGOING MENUS ===
-        // Install a transformer that watches all outgoing payloads for menus
-        ctx.api.config.use(async (prev, method, payload, signal) => {
-            const p: Record<string, unknown> = payload;
-            if (Array.isArray(p.results)) {
-                await Promise.all(p.results.map((r) => prepare(r)));
-            } else {
-                await prepare(p);
-            }
-            return await prev(method, payload, signal);
-        });
+        ctx.api.config.use(
+            // Install a transformer that watches all outgoing payloads for menus
+            async (prev, method, payload, signal) => {
+                const p: Record<string, unknown> = payload;
+                if (Array.isArray(p.results)) {
+                    await Promise.all(p.results.map((r) => prepare(r)));
+                } else {
+                    await prepare(p);
+                }
+                return await prev(method, payload, signal);
+            },
+            // Install a transformer that injects dirty menus into API calls
+            (prev, method, payload, signal) => {
+                if (
+                    INJECT_METHODS.has(method) &&
+                    !("reply_markup" in payload) &&
+                    "chat_id" in payload &&
+                    payload.chat_id !== undefined &&
+                    "message_id" in payload &&
+                    payload.message_id !== undefined
+                ) {
+                    Object.assign(payload, {
+                        reply_markup: this.getAndClearDirtyMenu(
+                            payload.chat_id,
+                            payload.message_id,
+                        ),
+                    });
+                }
+                return prev(method, payload, signal);
+            },
+        );
 
         // === CHECK INCOMING UPDATES ===
+        const skip = { handleClicks: () => Promise.resolve({ next: true }) };
         // Parse callback query data and check if this is for us
-        if (!ctx.has("callback_query:data")) return { next: true };
+        if (!ctx.has("callback_query:data")) return skip;
         const data = ctx.callbackQuery.data;
         const parsed = parseId(data);
-        if (parsed === undefined) return { next: true };
+        if (parsed === undefined) return skip;
         const { id, parts } = parsed;
-        if (parts.length < 4) return { next: true };
+        if (parts.length < 4) return skip;
         const [rowStr, colStr, payload, ...rest] = parts;
         const [type, ...h] = rest.join("/");
         const hash = h.join("");
         // Skip handling if this is not a known format
-        if (!rowStr || !colStr) return { next: true };
-        if (type !== "h" && type !== "f") return { next: true };
+        if (!rowStr || !colStr) return skip;
+        if (type !== "h" && type !== "f") return skip;
         // Get identified menu from index
         const menu = this.index.get(id);
-        if (menu === undefined) return { next: true };
+        if (menu === undefined) return skip;
         const row = parseInt(rowStr, 16);
         const col = parseInt(colStr, 16);
         if (row < 0 || col < 0) {
@@ -174,124 +187,121 @@ export class ConversationMenuPool<C extends Context> {
         // === HANDLE INCOMING CALLBACK QUERIES ===
         // Provide payload on `ctx.match` if it is not empty
         if (payload) ctx.match = payload;
-        // Install `ctx.menu`
-        let injectMenu = false;
-        let targetMenu: ConversationMenu<C> | undefined = menu;
-        ctx.api.config.use((prev, method, payload, signal) => {
-            if (
-                INJECT_METHODS.has(method) &&
-                !("reply_markup" in payload) &&
-                "chat_id" in payload &&
-                payload.chat_id !== undefined &&
-                payload.chat_id === ctx.chat?.id &&
-                "message_id" in payload &&
-                payload.message_id !== undefined &&
-                payload.message_id === ctx.msg?.message_id
-            ) {
-                injectMenu = false;
-                Object.assign(payload, { reply_markup: targetMenu });
-            }
-            return prev(method, payload, signal);
-        });
-        async function nav(
+        const nav = async (
             { immediate }: Immediate = {},
             menu?: ConversationMenu<C>,
-        ) {
-            injectMenu = true;
-            targetMenu = menu;
-            if (immediate) await ctx.editMessageReplyMarkup();
-        }
-        const lookup = (id: string) => {
-            const m = this.index.get(id);
-            if (m === undefined) {
-                const validIds = Array.from(this.index.keys())
-                    .map((k) => `'${k}'`)
-                    .join(", ");
+        ) => {
+            const chat = ctx.chatId;
+            if (chat === undefined) {
                 throw new Error(
-                    `Menu '${id}' is not known! Known menus are: ${validIds}`,
+                    "This update does not belong to a chat, so you cannot use this context object to send a menu",
                 );
             }
-            return m;
+            const message = ctx.msgId;
+            if (message === undefined) {
+                throw new Error(
+                    "This update does not contain a message, so you cannot use this context object to send a menu",
+                );
+            }
+            this.markMenuAsDirty(chat, message, menu);
+            if (immediate) await ctx.editMessageReplyMarkup();
         };
-        const controls: ConversationMenuControlPanel = {
-            update: (config) => nav(config, menu),
-            close: (config) => nav(config, undefined),
-            nav: (to, config) => nav(config, lookup(to)),
-            back: async (config) => {
-                const p = menu[opts].parent;
-                if (p === undefined) {
-                    throw new Error(`Menu ${menu.id} has no parent!`);
+
+        return {
+            handleClicks: async () => {
+                const controls: ConversationMenuControlPanel = {
+                    update: (config) => nav(config, menu),
+                    close: (config) => nav(config, undefined),
+                    nav: (to, config) => nav(config, this.lookup(to)),
+                    back: async (config) => {
+                        const p = menu[opts].parent;
+                        if (p === undefined) {
+                            throw new Error(`Menu ${menu.id} has no parent!`);
+                        }
+                        await nav(config, this.lookup(p));
+                    },
+                };
+                Object.assign(ctx, { menu: controls });
+                // We now have prepared the context for being handled by `menu` so we
+                // can actually begin handling the received callback query.
+                const mctx = ctx as ConversationMenuContext<C>;
+                const menuIsOutdated = async () => {
+                    console.error(`conversational menu '${id}' was outdated!`);
+                    console.error(new Error("trace").stack);
+                    await Promise.all([
+                        ctx.answerCallbackQuery(),
+                        ctx.editMessageReplyMarkup(),
+                    ]);
+                };
+                // Check fingerprint if used
+                const fingerprint = await uniform(ctx, menu[opts].fingerprint);
+                const useFp = fingerprint !== "";
+                if (useFp !== (type === "f")) {
+                    await menuIsOutdated();
+                    return { next: false };
                 }
-                await nav(config, lookup(p));
+                if (useFp && tinyHash(toNums(fingerprint)) !== hash) {
+                    await menuIsOutdated();
+                    return { next: false };
+                }
+                // Create renderer and perform rendering
+                const renderer = createHandlerRenderer<C>(ctx);
+                const range: RawRange<C> = await renderer(menu[ops]);
+                // Check dimension
+                if (
+                    !useFp && (row >= range.length || col >= range[row].length)
+                ) {
+                    await menuIsOutdated();
+                    return { next: false };
+                }
+                // Check correct button type
+                const btn = range[row][col];
+                if (!("middleware" in btn)) {
+                    if (!useFp) {
+                        await menuIsOutdated();
+                        return { next: false };
+                    }
+                    throw new Error(
+                        `Cannot invoke handlers because menu '${id}' is outdated!`,
+                    );
+                }
+                // Check dimensions
+                if (!useFp) {
+                    const rowCount = range.length;
+                    const rowLengths = range.map((row) => row.length);
+                    const label = await uniform(ctx, btn.text);
+                    const data = [rowCount, ...rowLengths, ...toNums(label)];
+                    const expectedHash = tinyHash(data);
+                    if (hash !== expectedHash) {
+                        await menuIsOutdated();
+                        return { next: false };
+                    }
+                }
+                // Run handler
+                const c = new Composer<ConversationMenuContext<C>>();
+                if (menu[opts].autoAnswer) {
+                    c.fork((ctx) => ctx.answerCallbackQuery());
+                }
+                c.use(...btn.middleware);
+                let next = false;
+                await c.middleware()(mctx, () => {
+                    next = true;
+                    return Promise.resolve();
+                });
+                // Update all dirty menus
+                const dirtyChats = Array.from(this.dirty.entries());
+                await Promise.all(
+                    dirtyChats.flatMap(([chat, messages]) =>
+                        Array
+                            .from(messages.keys())
+                            .map((message) =>
+                                ctx.api.editMessageReplyMarkup(chat, message)
+                            )
+                    ),
+                );
+                return { next };
             },
         };
-        Object.assign(ctx, { menu: controls });
-        // We now have prepared the context for being handled by `menu` so we
-        // can actually begin handling the received callback query.
-        const mctx = ctx as ConversationMenuContext<C>;
-        async function menuIsOutdated() {
-            console.error(`conversational menu '${id}' was outdated!`);
-            console.error(new Error("trace").stack);
-            await Promise.all([
-                ctx.answerCallbackQuery(),
-                ctx.editMessageReplyMarkup(),
-            ]);
-        }
-        // Check fingerprint if used
-        const fingerprint = await uniform(ctx, menu[opts].fingerprint);
-        const useFp = fingerprint !== "";
-        if (useFp !== (type === "f")) {
-            await menuIsOutdated();
-            return { next: false };
-        }
-        if (useFp && tinyHash(toNums(fingerprint)) !== hash) {
-            await menuIsOutdated();
-            return { next: false };
-        }
-        // Create renderer and perform rendering
-        const renderer = createRenderer(ctx, (btn: MenuButton<C>) => btn);
-        const range: RawRange<C> = await renderer(menu[ops]);
-        // Check dimension
-        if (!useFp && (row >= range.length || col >= range[row].length)) {
-            await menuIsOutdated();
-            return { next: false };
-        }
-        // Check correct button type
-        const btn = range[row][col];
-        if (!("middleware" in btn)) {
-            if (!useFp) {
-                await menuIsOutdated();
-                return { next: false };
-            }
-            throw new Error(
-                `Cannot invoke handlers because menu '${id}' is outdated!`,
-            );
-        }
-        // Check dimensions
-        if (!useFp) {
-            const rowCount = range.length;
-            const rowLengths = range.map((row) => row.length);
-            const label = await uniform(ctx, btn.text);
-            const data = [rowCount, ...rowLengths, ...toNums(label)];
-            const expectedHash = tinyHash(data);
-            if (hash !== expectedHash) {
-                await menuIsOutdated();
-                return { next: false };
-            }
-        }
-        // Run handler
-        const c = new Composer<ConversationMenuContext<C>>();
-        if (menu[opts].autoAnswer) {
-            c.fork((ctx) => ctx.answerCallbackQuery());
-        }
-        c.use(...btn.middleware);
-        let next = false;
-        await c.middleware()(mctx, () => {
-            next = true;
-            return Promise.resolve();
-        });
-        if (injectMenu) await nav({ immediate: true }, targetMenu);
-        return { next };
     }
 }
 
@@ -565,6 +575,38 @@ function createRenderer<C extends Context, B>(
     return (ops) => ops.reduce(layout, Promise.resolve([[]]));
 }
 
+function createDisplayRenderer<C extends Context>(id: string, ctx: C) {
+    return createRenderer(
+        ctx,
+        async (btn, i, j): Promise<InlineKeyboardButton> => {
+            const text = await uniform(ctx, btn.text);
+
+            if ("url" in btn) {
+                let { url, ...rest } = btn;
+                url = await uniform(ctx, btn.url);
+                return { ...rest, url, text };
+            } else if ("middleware" in btn) {
+                const row = i.toString(16);
+                const col = j.toString(16);
+                const payload = await uniform(ctx, btn.payload, "");
+                if (payload.includes("/")) {
+                    throw new Error(
+                        `Could not render menu '${id}'! Payload must not contain a '/' character but was '${payload}'`,
+                    );
+                }
+                return {
+                    callback_data: `${id}/${row}/${col}/${payload}/`,
+                    text,
+                };
+            } else return { ...btn, text };
+        },
+    );
+}
+
+function createHandlerRenderer<C extends Context>(ctx: C) {
+    return createRenderer(ctx, (btn: MenuButton<C>) => btn);
+}
+
 /**
  * Turns an optional and potentially dynamic string into a regular string for a
  * given context object.
@@ -582,4 +624,25 @@ function uniform<C extends Context>(
     if (value === undefined) return fallback;
     else if (typeof value === "function") return value(ctx);
     else return value;
+}
+
+function appendHashes(keyboard: InlineKeyboardButton[][], fingerprint: string) {
+    const lengths = [keyboard.length, ...keyboard.map((row) => row.length)];
+    for (const row of keyboard) {
+        for (const btn of row) {
+            if ("callback_data" in btn) {
+                // Inject hash values to detect keyboard changes
+                let type: "h" | "f";
+                let data: number[];
+                if (fingerprint) {
+                    type = "f";
+                    data = toNums(fingerprint);
+                } else {
+                    type = "h";
+                    data = [...lengths, ...toNums(btn.text)];
+                }
+                btn.callback_data += type + tinyHash(data);
+            }
+        }
+    }
 }

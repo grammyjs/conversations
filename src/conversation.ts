@@ -72,7 +72,7 @@ export class Conversation<C extends Context = Context> {
         private controls: ReplayControls,
         private hydrate: (update: Update) => C,
         private escape: ApplyContext,
-        private middleware: MiddlewareFn<C>,
+        private plugins: MiddlewareFn<C>,
         private options: ConversationHandleOptions,
     ) {}
     wait(options: WaitOptions = {}): AndPromise<C> {
@@ -99,10 +99,12 @@ First return your data from `external` and then resume update handling using `wa
 
             // convert to context object
             const ctx = this.hydrate(update);
+            // prepare context for menus
+            const { handleClicks } = this.menuPool.install(ctx);
 
             // run plugins
             let pluginsCalledNext = false;
-            await this.middleware(ctx, () => {
+            await this.plugins(ctx, () => {
                 pluginsCalledNext = true;
                 return Promise.resolve();
             });
@@ -111,7 +113,7 @@ First return your data from `external` and then resume update handling using `wa
             if (!pluginsCalledNext) return await this.wait(options);
 
             // run menus
-            const { next: menuCalledNext } = await this.menuPool.handle(ctx);
+            const { next: menuCalledNext } = await handleClicks();
             // If a menu decided to handle the update (did not call `next`),
             // then we recurse and simply wait for another update.
             if (!menuCalledNext) return await this.wait(options);
