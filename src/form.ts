@@ -23,7 +23,7 @@ export type Action<C extends Context> = (ctx: C) => unknown | Promise<unknown>;
 
 export type FormOptions<C extends Context> = Action<C> | FormConfig<C>;
 export interface FormConfig<C extends Context> {
-    drop?: boolean;
+    next?: boolean;
     maxMilliseconds?: number;
     collationKey?: string;
     action?: Action<C>;
@@ -41,12 +41,12 @@ export class ConversationForm<C extends Context> {
             wait: (
                 opts: { maxMilliseconds?: number; collationKey?: string },
             ) => Promise<C>;
-            skip: (opts: { drop?: boolean }) => Promise<never>;
+            skip: (opts: { next?: boolean }) => Promise<never>;
         },
     ) {}
 
     async build<T>(builder: FormBuilder<C, T>) {
-        const { validate, action, otherwise, drop, ...waitOptions } = builder;
+        const { validate, action, otherwise, next, ...waitOptions } = builder;
         const ctx = await this.conversation.wait({
             collationKey: "form",
             ...waitOptions,
@@ -57,7 +57,7 @@ export class ConversationForm<C extends Context> {
             return result.value;
         } else {
             if (otherwise !== undefined) await otherwise(ctx);
-            return await this.conversation.skip({ drop });
+            return await this.conversation.skip({ next });
         }
     }
     async text(options?: FormOptions<C>) {

@@ -54,15 +54,13 @@ interface ConversationIndexEntry<C extends Context> {
     builder: ConversationBuilder<C>;
     plugins: Middleware<C>[];
     maxMillisecondsToWait: number | undefined;
+    parallel: boolean;
 }
 export type ConversationFlavor<C extends Context> = C & {
     conversation: ConversationControls;
 };
 export interface ConversationControls {
-    enter(
-        name: string,
-        options?: { parallel?: boolean; args?: unknown[] },
-    ): Promise<void>;
+    enter(name: string, ...args: unknown[]): Promise<void>;
     exit(name: string): Promise<void>;
     exitAll(): Promise<void>;
     exitOne(name: string, index: number): Promise<void>;
@@ -71,9 +69,10 @@ export interface ConversationControls {
 }
 function controls(
     getData: () => ConversationData,
-    canSave: () => boolean,
+    isParallel: (name: string) => boolean,
     enter: (name: string, ...args: unknown[]) => Promise<EnterResult>,
-    exit?: (name: string) => Promise<void>,
+    exit: ((name: string) => Promise<void>) | undefined,
+    canSave: () => boolean,
 ): ConversationControls {
     async function fireExit(events: string[]) {
         if (exit === undefined) return;
@@ -84,18 +83,24 @@ function controls(
     }
 
     return {
-        async enter(name, options) {
+        async enter(name, ...args) {
             if (!canSave()) {
                 throw new Error(
-                    "The middleware has already completed so it is no longer possible to enter a conversation",
+                    "The middleware has already completed so it is \
+no longer possible to enter a conversation",
                 );
             }
             const data = getData();
-            if (Object.keys(data).length > 0 && !options?.parallel) {
-                throw new Error("This conversation was already entered");
+            if (Object.keys(data).length > 0 && !isParallel(name)) {
+                throw new Error(
+                    `A conversation was already entered and '${name}' \
+is not a parallel conversation. Make sure to exit all active conversations \
+before entering a new one, or specify { parallel: true } for '${name}' \
+if you want it to run in parallel.`,
+                );
             }
             data[name] ??= [];
-            const result = await enter(name, ...options?.args ?? []);
+            const result = await enter(name, ...args);
             if (!canSave()) {
                 throw new Error(
                     "The middleware has completed before conversation was fully \
@@ -226,6 +231,9 @@ export function conversations<OC extends Context, C extends Context>(
                 await options.onExit?.(name);
             }
             : undefined;
+        function isParallel(name: string) {
+            return index.get(name)?.parallel ?? true;
+        }
 
         function canSave() {
             return !(internalCompletenessMarker in ctx);
@@ -238,7 +246,7 @@ export function conversations<OC extends Context, C extends Context>(
         });
         Object.defineProperty(ctx, internalExitHandler, { get: () => exit });
         Object.defineProperty(ctx, "conversation", {
-            value: controls(getData, canSave, enter, exit),
+            value: controls(getData, isParallel, enter, exit, canSave),
         });
         await next();
         Object.defineProperty(ctx, internalCompletenessMarker, { value: true });
@@ -281,7 +289,7 @@ export type ConversationResult =
     | ConversationSkipped;
 export interface ConversationComplete {
     status: "complete";
-    proceed: boolean;
+    next: boolean;
 }
 export interface ConversationError {
     status: "error";
@@ -306,7 +314,7 @@ export interface ConversationConfig<C extends Context> {
     id?: string;
     plugins?: Middleware<C>[];
     maxMillisecondsToWait?: number;
-    seal?: boolean;
+    parallel?: boolean;
 }
 
 export function createConversation<OC extends Context, C extends Context>(
@@ -317,7 +325,7 @@ export function createConversation<OC extends Context, C extends Context>(
         id = builder.name,
         plugins = [],
         maxMillisecondsToWait = undefined,
-        seal = false,
+        parallel = false,
     } = typeof options === "string" ? { id: options } : options ?? {};
     if (!id) {
         throw new Error("Cannot register a conversation without a name!");
@@ -344,6 +352,7 @@ export function createConversation<OC extends Context, C extends Context>(
             builder,
             plugins: combinedPlugins,
             maxMillisecondsToWait,
+            parallel,
         });
         const onExit = ctx[internalExitHandler] as
             | ((name: string) => unknown | Promise<unknown>)
@@ -363,7 +372,7 @@ export function createConversation<OC extends Context, C extends Context>(
             plugins: combinedPlugins,
             onHalt,
             maxMillisecondsToWait,
-            seal,
+            parallel,
         };
         const result = await runParallelConversations(
             builder,
@@ -374,7 +383,7 @@ export function createConversation<OC extends Context, C extends Context>(
         );
         switch (result.status) {
             case "complete":
-                if (result.proceed) await next();
+                if (result.next) await next();
                 return;
             case "error":
                 throw result.error;
@@ -410,7 +419,7 @@ export async function runParallelConversations<C extends Context>(
             case "complete":
                 states.splice(i, 1);
                 if (states.length === 0) delete data[id];
-                if (result.proceed) continue;
+                if (result.next) continue;
                 else return result;
             case "error":
                 states.splice(i, 1);
@@ -475,7 +484,7 @@ export interface ResumeOptions<C extends Context> {
     plugins?: Middleware<C>[];
     onHalt?: () => void | Promise<void>;
     maxMillisecondsToWait?: number;
-    seal?: boolean;
+    parallel?: boolean;
 }
 export async function resumeConversation<C extends Context>(
     conversation: ConversationBuilder<C>,
@@ -492,7 +501,7 @@ export async function resumeConversation<C extends Context>(
         plugins = [],
         onHalt,
         maxMillisecondsToWait,
-        seal,
+        parallel,
     } = options ?? {};
     const middleware = new Composer(...plugins).middleware();
     // deno-lint-ignore no-explicit-any
@@ -502,7 +511,7 @@ export async function resumeConversation<C extends Context>(
         const convo = new Conversation(controls, hydrate, escape, middleware, {
             onHalt,
             maxMillisecondsToWait,
-            seal,
+            parallel,
         });
         const ctx = await convo.wait({ maxMilliseconds: undefined });
         await conversation(convo, ctx, ...args);
@@ -524,7 +533,7 @@ export async function resumeConversation<C extends Context>(
             switch (result.type) {
                 case "returned":
                     // tell caller that we are done, all good
-                    return { status: "complete", proceed: false };
+                    return { status: "complete", next: false };
                 case "thrown":
                     // tell caller that an error was thrown, it should leave the
                     // conversation and rethrow the error
@@ -562,11 +571,11 @@ export async function resumeConversation<C extends Context>(
                             };
                         case "halt":
                             // tell caller that we are done, all good
-                            return { status: "complete", proceed: false };
+                            return { status: "complete", next: false };
                         case "kill":
                             // tell the called that we are done and that downstream
                             // middleware must be called
-                            return { status: "complete", proceed: true };
+                            return { status: "complete", next: true };
                         default:
                             throw new Error("invalid cancel message received"); // cannot happen
                     }

@@ -41,7 +41,7 @@ type ApplyContext = <F extends (ctx: Context) => unknown>(
 export interface ConversationHandleOptions {
     onHalt?(): void | Promise<void>;
     maxMillisecondsToWait?: number;
-    seal?: boolean;
+    parallel?: boolean;
 }
 
 export interface WaitOptions {
@@ -49,7 +49,7 @@ export interface WaitOptions {
     collationKey?: string;
 }
 export interface SkipOptions {
-    drop?: boolean;
+    next?: boolean;
 }
 export interface AndOtherwiseOptions<C extends Context> extends SkipOptions {
     otherwise?: (ctx: C) => unknown | Promise<unknown>;
@@ -58,7 +58,7 @@ export interface OtherwiseOptions<C extends Context>
     extends WaitOptions, AndOtherwiseOptions<C> {}
 
 export interface HaltOptions {
-    proceed?: boolean;
+    next?: boolean;
 }
 
 export class Conversation<C extends Context = Context> {
@@ -93,7 +93,7 @@ First return your data from `external` and then resume update handling using `wa
             if (before !== false) {
                 const after = await this.now();
                 if (after - before >= limit) {
-                    await this.halt({ proceed: true });
+                    await this.halt({ next: true });
                 }
             }
 
@@ -123,12 +123,12 @@ First return your data from `external` and then resume update handling using `wa
         return this.combineAnd(makeWait());
     }
     async skip(options: SkipOptions = {}): Promise<never> {
-        const drop = "drop" in options ? options.drop : this.options.seal;
-        return await this.controls.cancel(drop ? "drop" : "skip");
+        const next = "next" in options ? options.next : this.options.parallel;
+        return await this.controls.cancel(next ? "skip" : "drop");
     }
     async halt(options?: HaltOptions): Promise<never> {
         await this.options.onHalt?.();
-        return await this.controls.cancel(options?.proceed ? "kill" : "halt");
+        return await this.controls.cancel(options?.next ? "kill" : "halt");
     }
     checkpoint(): Checkpoint {
         return this.controls.checkpoint();
@@ -213,14 +213,14 @@ First return your data from `external` and then resume update handling using `wa
         opts: OtherwiseOptions<C> = {},
     ): AndPromise<C> {
         const makeWait = async () => {
-            const { otherwise, drop, ...waitOptions } = opts;
+            const { otherwise, next, ...waitOptions } = opts;
             const ctx = await this.wait({
                 collationKey: "until",
                 ...waitOptions,
             });
             if (!await predicate(ctx)) {
                 await otherwise?.(ctx);
-                await this.skip({ drop });
+                await this.skip({ next });
             }
             return ctx;
         };
