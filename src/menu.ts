@@ -138,7 +138,7 @@ export class ConversationMenuPool<C extends Context> {
                 return await prev(method, payload, signal);
             },
             // Install a transformer that injects dirty menus into API calls
-            (prev, method, payload, signal) => {
+            async (prev, method, payload, signal) => {
                 if (
                     INJECT_METHODS.has(method) &&
                     !("reply_markup" in payload) &&
@@ -154,7 +154,7 @@ export class ConversationMenuPool<C extends Context> {
                         ),
                     });
                 }
-                return prev(method, payload, signal);
+                return await prev(method, payload, signal);
             },
         );
 
@@ -602,7 +602,6 @@ function createDisplayRenderer<C extends Context>(id: string, ctx: C) {
         },
     );
 }
-
 function createHandlerRenderer<C extends Context>(ctx: C) {
     return createRenderer(ctx, (btn: MenuButton<C>) => btn);
 }
