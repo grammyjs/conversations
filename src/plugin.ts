@@ -248,30 +248,35 @@ export function conversations<OC extends Context, C extends Context>(
         Object.defineProperty(ctx, "conversation", {
             value: controls(getData, isParallel, enter, exit, canSave),
         });
-        await next();
-        Object.defineProperty(ctx, internalCompletenessMarker, { value: true });
-        if (read) {
-            // In case of bad usage of async/await, it is possible that `next`
-            // resolves while an enter call is still running. It then may not
-            // have cleaned up its data, leaving behind empty arrays on the
-            // state. Instead of delegating the cleanup responsibility to enter
-            // calls which are unable to do this reliably, we purge empty arrays
-            // ourselves before persisting the state. That way, we don't store
-            // useless data even when bot developers mess up.
-            const keys = Object.keys(state);
-            const len = keys.length;
-            let del = 0;
-            for (let i = 0; i < len; i++) {
-                const key = keys[i];
-                if (state[key].length === 0) {
-                    delete state[key];
-                    del++;
+        try {
+            await next();
+        } finally {
+            Object.defineProperty(ctx, internalCompletenessMarker, {
+                value: true,
+            });
+            if (read) {
+                // In case of bad usage of async/await, it is possible that `next`
+                // resolves while an enter call is still running. It then may not
+                // have cleaned up its data, leaving behind empty arrays on the
+                // state. Instead of delegating the cleanup responsibility to enter
+                // calls which are unable to do this reliably, we purge empty arrays
+                // ourselves before persisting the state. That way, we don't store
+                // useless data even when bot developers mess up.
+                const keys = Object.keys(state);
+                const len = keys.length;
+                let del = 0;
+                for (let i = 0; i < len; i++) {
+                    const key = keys[i];
+                    if (state[key].length === 0) {
+                        delete state[key];
+                        del++;
+                    }
                 }
-            }
-            if (len !== del) { // len - del > 0
-                await storage.write(state);
-            } else if (!empty) {
-                await storage.delete();
+                if (len !== del) { // len - del > 0
+                    await storage.write(state);
+                } else if (!empty) {
+                    await storage.delete();
+                }
             }
         }
     };
