@@ -19,13 +19,16 @@ import {
 import { youTouchYouDie } from "./nope.ts";
 import { type ConversationStorage, uniformStorage } from "./storage.ts";
 
-// TODO: merge some of these
 const internalRecursionDetection = Symbol("conversations.recursion");
-const internalMutableState = Symbol("conversations.data");
-const internalIndex = Symbol("conversations.builders");
-const internalDefaultPlugins = Symbol("conversations.plugins");
-const internalExitHandler = Symbol("conversations.exit");
+const internalState = Symbol("conversations.state");
 const internalCompletenessMarker = Symbol("conversations.completeness");
+
+interface InternalState<C extends Context> {
+    getMutableData(): ConversationData;
+    index: ConversationIndex<C>;
+    defaultPlugins: Middleware<C>[];
+    exitHandler?: (name: string) => Promise<void>;
+}
 
 export interface ContextBaseData {
     update: Update;
@@ -188,7 +191,7 @@ export function conversations<OC extends Context, C extends Context>(
                 "Cannot install the conversations plugin on context objects created by the conversations plugin!",
             );
         }
-        if (internalMutableState in ctx) {
+        if (internalState in ctx) {
             throw new Error("Cannot install conversations plugin twice!");
         }
 
@@ -239,15 +242,14 @@ export function conversations<OC extends Context, C extends Context>(
             return !(internalCompletenessMarker in ctx);
         }
 
-        Object.defineProperty(ctx, internalMutableState, { get: getData });
-        Object.defineProperty(ctx, internalIndex, { value: index });
-        Object.defineProperty(ctx, internalDefaultPlugins, {
-            value: options.plugins ?? [],
-        });
-        Object.defineProperty(ctx, internalExitHandler, { get: () => exit });
-        Object.defineProperty(ctx, "conversation", {
-            value: controls(getData, isParallel, enter, exit, canSave),
-        });
+        const internal: InternalState<C> = {
+            getMutableData: getData,
+            index,
+            defaultPlugins: options.plugins ?? [],
+            exitHandler: exit,
+        };
+        Object.defineProperty(ctx, internalState, { value: internal });
+        ctx.conversation = controls(getData, isParallel, enter, exit, canSave);
         try {
             await next();
         } finally {
@@ -336,22 +338,17 @@ export function createConversation<OC extends Context, C extends Context>(
         throw new Error("Cannot register a conversation without a name!");
     }
     return async (ctx, next) => {
-        if (
-            !(internalMutableState in ctx) ||
-            !(internalIndex in ctx) ||
-            !(internalDefaultPlugins in ctx) ||
-            !(internalExitHandler in ctx)
-        ) {
+        if (!(internalState in ctx)) {
             throw new Error(
                 "Cannot register a conversation without installing the conversations plugin first!",
             );
         }
 
-        const index = ctx[internalIndex] as ConversationIndex<C>;
+        const { index, defaultPlugins, getMutableData, exitHandler } =
+            ctx[internalState] as InternalState<C>;
         if (index.has(id)) {
             throw new Error(`Duplicate conversation identifier '${id}'!`);
         }
-        const defaultPlugins = ctx[internalDefaultPlugins] as Middleware<C>[];
         const combinedPlugins = [...defaultPlugins, ...plugins];
         index.set(id, {
             builder,
@@ -359,14 +356,11 @@ export function createConversation<OC extends Context, C extends Context>(
             maxMillisecondsToWait,
             parallel,
         });
-        const onExit = ctx[internalExitHandler] as
-            | ((name: string) => unknown | Promise<unknown>)
-            | undefined;
         const onHalt = async () => {
-            await onExit?.(id);
+            await exitHandler?.(id);
         };
 
-        const mutableData = ctx[internalMutableState] as ConversationData;
+        const mutableData = getMutableData();
         const base: ContextBaseData = {
             update: ctx.update,
             api: ctx.api,
