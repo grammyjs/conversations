@@ -6,7 +6,7 @@
         "test": "deno test --allow-import test",
         "ok": "deno fmt && deno lint && deno task test && deno task check",
         "clean": "git clean -fX out test/cov_profile test/coverage coverage.lcov",
-        "coverage": "deno task clean && deno task test --coverage=./test/cov_profile && deno coverage --lcov --output=./coverage.lcov ./test/cov_profile",
+        "coverage": "deno task clean && deno task test --allow-import --coverage=./test/cov_profile && deno coverage --lcov --output=./coverage.lcov ./test/cov_profile",
         "report": "genhtml ./coverage.lcov --output-directory ./test/coverage/ && echo 'Point your browser to test/coverage/index.html to see the test coverage report.'"
     },
     "exclude": [
