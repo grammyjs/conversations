@@ -98,9 +98,9 @@ describe("Conversation", () => {
         let j = 0;
         async function convo(conversation: Convo, ctx: Context) {
             i++;
-            if ("no" in ctx.update) await conversation.skip();
+            if ("no" in ctx.update) await conversation.skip({ next: true });
             ctx = await conversation.wait();
-            if ("no" in ctx.update) await conversation.skip();
+            if ("no" in ctx.update) await conversation.skip({ next: true });
             j++;
         }
         const no = mkctx({ no: true });
@@ -251,7 +251,7 @@ describe("Conversation", () => {
         let i = 0;
         let j = 0;
         class MyError extends Error {
-            name = "errands";
+            override name = "errands";
         }
         async function convo(conversation: Convo) {
             try {
@@ -312,7 +312,7 @@ describe("Conversation", () => {
             const [l, r] = await p.then(async (res) => {
                 const c = await conversation.wait(); // fourth, fifth, sixth
                 if ("no" in c.update) {
-                    await conversation.skip();
+                    await conversation.skip({ next: true });
                 }
                 // @ts-expect-error mock
                 await ctx.api.raw.sendMessage1({ text: "go" }).then(() =>
@@ -329,13 +329,13 @@ describe("Conversation", () => {
                 await ctx.api.raw.sendMessage3({ two: l.update.two });
                 // @ts-expect-error mock
                 await ctx.api.raw.sendMessage4({ three: r.update.three });
-                conversation.skip();
+                conversation.skip({ next: true });
                 await conversation.wait(); // never resolves due to skip
             }
             // @ts-expect-error mock
             await ctx.api.raw.sendMessage5({ text: "done" });
             conversation.halt();
-            conversation.skip();
+            conversation.skip({ next: true });
         }
 
         const first = await enterConversation(convo, mkctx());
@@ -445,7 +445,7 @@ describe("Conversation", () => {
 
         async function convo(conversation: Convo, ctx: Context) { // first, second
             if ("no" in ctx.update) {
-                conversation.skip();
+                conversation.skip({ next: true });
                 // @ts-expect-error mock
                 ctx.api.raw.sendMessage0({ one: ctx.update.one })
                     .then(() =>
@@ -456,7 +456,7 @@ describe("Conversation", () => {
                 await conversation.wait(); // never resolves due to skip
             }
             ctx = await conversation.wait();
-            conversation.skip();
+            conversation.skip({ next: true });
 
             // the conversation builder function should still wait for micro tasks to happen in case
             // @ts-expect-error mock
@@ -599,6 +599,10 @@ describe("Conversation", () => {
             date: 1,
             message_id: 31415,
         };
+        const enter: Update = {
+            update_id: 4,
+            message: { message_id: 0, chat, date: Date.now(), from, text: "" },
+        };
         const drop: Update = {
             update_id: 1729,
             message: {
@@ -641,7 +645,7 @@ describe("Conversation", () => {
             assertEquals(ctx.update, pass);
             i++;
         }
-        const first = await enterConversation(convo, mkctx());
+        const first = await enterConversation(convo, mkctx(enter));
         assertEquals(first.status, "handled");
         assert(first.status === "handled");
         const args = first.args;
@@ -650,10 +654,14 @@ describe("Conversation", () => {
             replay: first.replay,
             interrupts: first.interrupts,
         };
-        let res = await resumeConversation(convo, mkctx(drop), state);
+        let res = await resumeConversation(convo, mkctx(drop), state, {
+            parallel: true,
+        });
         assertEquals(res.status, "skipped");
         assert(res.status === "skipped");
-        res = await resumeConversation(convo, mkctx(pass), state);
+        res = await resumeConversation(convo, mkctx(pass), state, {
+            parallel: true,
+        });
         assertEquals(res.status, "complete");
         assert(res.status === "complete");
         assertEquals(i, 1);
