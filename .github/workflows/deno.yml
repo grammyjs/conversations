@@ -68,13 +68,13 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Setup repo
-              uses: actions/checkout@v3
+              uses: actions/checkout@v4
               with:
                   fetch-depth: 0
 
             - uses: denoland/setup-deno@v2
               with:
-                  deno-version: v1.x
+                  deno-version: v2.x
 
             - name: Create coverage files
               run: deno task coverage
