@@ -27,3 +27,4 @@ coverage.lcov
 
 # Build output
 out/
+docs/
