@@ -34,14 +34,14 @@ export interface VersionedStateStorage<K, S> {
     delete(key: K): MaybePromise<void>;
 }
 export interface ConversationContextStorage<C extends Context, S> {
-    version?: string | number;
     type: "context";
+    version?: string | number;
     adapter: VersionedStateStorage<C, S>;
 }
 export interface ConversationKeyStorage<C extends Context, S> {
-    version?: string | number;
     type: "key";
-    getStorageKey(ctx: C): string | undefined;
+    version?: string | number;
+    getStorageKey?: (ctx: C) => string | undefined;
     adapter: VersionedStateStorage<string, S>;
 }
 
@@ -64,18 +64,14 @@ export function uniformStorage<C extends Context, S>(
     storage: ConversationStorage<C, S> = defaultStorage(),
 ) {
     if (storage.type === undefined) {
-        return uniformStorage({
-            type: "key",
-            getStorageKey: defaultStorageKey,
-            adapter: storage,
-        });
+        return uniformStorage({ type: "key", adapter: storage });
     }
 
     const version = storage.version ?? 0;
     const { versionify, unpack } = pinVersion(version);
 
     if (storage.type === "key") {
-        const { getStorageKey, adapter } = storage;
+        const { getStorageKey = defaultStorageKey, adapter } = storage;
         return (ctx: C) => {
             const key = getStorageKey(ctx);
             return key === undefined
