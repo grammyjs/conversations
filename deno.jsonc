@@ -1,29 +1,22 @@
 {
     "lock": false,
     "tasks": {
-        "check": "deno cache --check=all src/mod.ts",
-        "backport": "deno run --no-prompt --allow-read=. --allow-write=. https://deno.land/x/deno2node@v1.8.1/src/cli.ts tsconfig.json",
-        "test": "deno test test",
-        "dev": "deno fmt && deno lint && deno task test && deno task check",
+        "check": "deno cache --allow-import --check=all src/mod.ts",
+        "build": "deno run --no-prompt --allow-read=. --allow-write=. https://deno.land/x/deno2node@v1.8.1/src/cli.ts tsconfig.json",
+        "test": "deno test --allow-import test",
+        "ok": "deno fmt && deno lint && deno task test && deno task check",
         "clean": "git clean -fX out test/cov_profile test/coverage coverage.lcov",
         "coverage": "deno task clean && deno task test --coverage=./test/cov_profile && deno coverage --lcov --output=./coverage.lcov ./test/cov_profile",
         "report": "genhtml ./coverage.lcov --output-directory ./test/coverage/ && echo 'Point your browser to test/coverage/index.html to see the test coverage report.'"
     },
+    "exclude": [
+        "./node_modules/",
+        "./out/",
+        "./package-lock.json",
+        "./test/cov_profile"
+    ],
     "fmt": {
         "indentWidth": 4,
-        "proseWrap": "preserve",
-        "exclude": [
-            "./node_modules/",
-            "./out/",
-            "./package-lock.json",
-            "./test/cov_profile"
-        ]
-    },
-    "lint": {
-        "exclude": [
-            "./node_modules/",
-            "./out/",
-            "./package-lock.json"
-        ]
+        "proseWrap": "preserve"
     }
 }

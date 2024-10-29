@@ -1,32 +1,3 @@
-import { delistify, listify } from "./deps.deno.ts";
-
-/** Identity function */
-export function ident<T>(arg: T) {
-    return arg;
-}
-
-/**
- * Performs a structured clone, ignoring non-enumerable properties such as
- * functions.
- */
-export function clone<T>(arg: T) {
-    const list = listify(arg);
-    if (Array.isArray(list) && list.length === 0) return undefined;
-    return delistify(list);
-}
-
-// Define which context properties are intrinsic to grammY or this plugin and
-// should not be stored in the op logs
-const INTRINSIC_CONTEXT_PROPS = new Set([
-    "update",
-    "api",
-    "me",
-    "conversation",
-]);
-export function IS_NOT_INTRINSIC(key: string) {
-    return !INTRINSIC_CONTEXT_PROPS.has(key);
-}
-
 /**
  * A resolver wraps a promise so that it can be resolved by an outside event. It
  * is a container for this promise which you can `await`, and a function
@@ -54,10 +25,10 @@ export function resolver<T>(value?: T): Resolver<T> {
     const rsr = { value, isResolved: () => false } as Resolver<T>;
     rsr.promise = new Promise((resolve) => {
         rsr.resolve = (t = value) => {
-            if (t === undefined) throw new Error("No resolve value given!");
-            rsr.isResolved = () => true;
+            rsr.isResolved = (): this is { value: T } => true;
             rsr.value = t;
-            resolve(t);
+            resolve(t as T); // cast to handle void
+            rsr.resolve = () => {}; // double resolve is no-op
         };
     });
     return rsr;

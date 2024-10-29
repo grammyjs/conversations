@@ -2,14 +2,5 @@
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
         "source.fixAll": "explicit"
-    },
-    "deno.enable": true,
-    "deno.lint": true,
-    "deno.config": "./deno.jsonc",
-    "deno.suggest.imports.hosts": {
-        "https://deno.land": true,
-        "https://x.nest.land": true,
-        "https://crux.land": true,
-        "https://lib.deno.dev": false
     }
 }
