@@ -1,5 +1,9 @@
-import { Context } from "../../grammY/src/context.ts";
-import { Api, type Update, type UserFromGetMe } from "../src/deps.deno.ts";
+import {
+    Api,
+    Context,
+    type Update,
+    type UserFromGetMe,
+} from "../src/deps.deno.ts";
 import {
     pinVersion,
     uniformStorage,
