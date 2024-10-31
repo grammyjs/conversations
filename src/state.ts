@@ -231,9 +231,9 @@ export function cursor(state: ReplayState): ReplayCursor {
                 // make sure we resolve only when it is our turn
                 await changes.promise;
                 if (receive === state.receive.length) {
-                    // It will never be our turn, because
-                    // the replay completed and we are still here.
-                    return;
+                    // It will never be our turn, because the replay completed
+                    // and we are still here. We will have to call `result`.
+                    return await done(op, result);
                 }
             } // state.receive[receive].send === op
             data = state.receive[receive].returnValue;
