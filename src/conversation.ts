@@ -146,8 +146,8 @@ export interface SkipOptions {
  */
 export interface AndOtherwiseOptions<C extends Context> extends SkipOptions {
     /**
-     * Callback that will be invoked when the nested validation fails for a
-     * context object which passed all higher validation rules.
+     * Callback that will be invoked when the validation fails for a context
+     * object.
      *
      * @param ctx The context object that failed validation
      */
