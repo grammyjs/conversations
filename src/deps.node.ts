@@ -22,6 +22,7 @@ export type {
     Contact,
     Dice,
     Document,
+    File,
     Game,
     InlineKeyboardButton,
     Location,

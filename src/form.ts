@@ -5,6 +5,7 @@ import type {
     Context,
     Dice,
     Document,
+    File,
     Game,
     Location,
     MessageEntity,
@@ -298,6 +299,29 @@ export class ConversationForm<C extends Context> {
                 const location = (ctx.message ?? ctx.channelPost)?.location;
                 if (location === undefined) return { ok: false };
                 return { ok: true, value: location };
+            },
+        });
+    }
+    async media(options?: FormOptions<C>) {
+        return await this.build({
+            collationKey: "form-location",
+            ...options,
+            validate: (ctx): Maybe<PhotoSize[] | Video> => {
+                const msg = ctx.message ?? ctx.channelPost;
+                const media = msg?.photo ?? msg?.video;
+                if (media === undefined) return { ok: false };
+                return { ok: true, value: media };
+            },
+        });
+    }
+    async file(options?: FormOptions<C>) {
+        return await this.build({
+            collationKey: "form-location",
+            ...options,
+            validate: async (ctx): Promise<Maybe<File>> => {
+                if (!ctx.has(":file")) return { ok: false };
+                const file = await ctx.getFile();
+                return { ok: true, value: file };
             },
         });
     }
