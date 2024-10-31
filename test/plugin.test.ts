@@ -264,10 +264,7 @@ describe("createConversation", () => {
                 i++;
                 await convo.wait();
                 j++;
-            }, {
-                id: "convo",
-                maxMillisecondsToWait: 10,
-            }),
+            }, { id: "convo", maxMillisecondsToWait: 1 }),
             async (ctx) => {
                 if (!enter) return;
                 enter = false;
@@ -276,7 +273,7 @@ describe("createConversation", () => {
         );
         const up = { message: { chat: { id: 0 } } };
         await mw.middleware()(mkctx(up), next);
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 5));
         await mw.middleware()(mkctx(up), next);
         assertEquals(i, 2);
         assertEquals(j, 0);
@@ -295,10 +292,7 @@ describe("createConversation", () => {
                 i++;
                 await convo.wait();
                 j++;
-            }, {
-                id: "convo",
-                maxMillisecondsToWait: 20,
-            }),
+            }, { id: "convo", maxMillisecondsToWait: 100 }),
             async (ctx) => {
                 if (!enter) return;
                 enter = false;
@@ -307,7 +301,7 @@ describe("createConversation", () => {
         );
         const up = { message: { chat: { id: 0 } } };
         await mw.middleware()(mkctx(up), next);
-        await new Promise((r) => setTimeout(r, 10));
+        await new Promise((r) => setTimeout(r, 5));
         await mw.middleware()(mkctx(up), next);
         assertEquals(i, 2);
         assertEquals(j, 1);
@@ -322,7 +316,7 @@ describe("createConversation", () => {
             conversations({ onExit }),
             createConversation(async (convo) => {
                 i++;
-                await convo.wait({ maxMilliseconds: 10 });
+                await convo.wait({ maxMilliseconds: 1 });
                 j++;
             }, "convo"),
             async (ctx) => {
@@ -333,7 +327,7 @@ describe("createConversation", () => {
         );
         const up = { message: { chat: { id: 0 } } };
         await mw.middleware()(mkctx(up), next);
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 5));
         await mw.middleware()(mkctx(up), next);
         assertEquals(i, 2);
         assertEquals(j, 0);
@@ -350,7 +344,7 @@ describe("createConversation", () => {
             conversations({ onExit }),
             createConversation(async (convo) => {
                 i++;
-                await convo.wait({ maxMilliseconds: 20 });
+                await convo.wait({ maxMilliseconds: 100 });
                 j++;
             }, "convo"),
             async (ctx) => {
@@ -361,7 +355,7 @@ describe("createConversation", () => {
         );
         const up = { message: { chat: { id: 0 } } };
         await mw.middleware()(mkctx(up), next);
-        await new Promise((r) => setTimeout(r, 10));
+        await new Promise((r) => setTimeout(r, 5));
         await mw.middleware()(mkctx(up), next);
         assertEquals(i, 2);
         assertEquals(j, 1);
