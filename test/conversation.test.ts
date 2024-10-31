@@ -100,7 +100,7 @@ describe("Conversation", () => {
             i++;
             if ("no" in ctx.update) await conversation.skip({ next: true });
             ctx = await conversation.wait();
-            if ("no" in ctx.update) await conversation.skip({ next: true });
+            if ("no" in ctx.update) await conversation.skip();
             j++;
         }
         const no = mkctx({ no: true });
@@ -111,6 +111,7 @@ describe("Conversation", () => {
         assert(second.status === "handled");
         const third = await resumeConversation(convo, no, second);
         assert(third.status === "skipped");
+        assertEquals(j, 0);
         const fourth = await resumeConversation(convo, yes, second);
         assert(fourth.status === "complete");
         assertEquals(i, 4);
@@ -312,7 +313,7 @@ describe("Conversation", () => {
             const [l, r] = await p.then(async (res) => {
                 const c = await conversation.wait(); // fourth, fifth, sixth
                 if ("no" in c.update) {
-                    await conversation.skip({ next: true });
+                    await conversation.skip();
                 }
                 // @ts-expect-error mock
                 await ctx.api.raw.sendMessage1({ text: "go" }).then(() =>
@@ -329,13 +330,13 @@ describe("Conversation", () => {
                 await ctx.api.raw.sendMessage3({ two: l.update.two });
                 // @ts-expect-error mock
                 await ctx.api.raw.sendMessage4({ three: r.update.three });
-                conversation.skip({ next: true });
+                conversation.skip();
                 await conversation.wait(); // never resolves due to skip
             }
             // @ts-expect-error mock
             await ctx.api.raw.sendMessage5({ text: "done" });
             conversation.halt();
-            conversation.skip({ next: true });
+            conversation.skip();
         }
 
         const first = await enterConversation(convo, mkctx());
@@ -445,7 +446,7 @@ describe("Conversation", () => {
 
         async function convo(conversation: Convo, ctx: Context) { // first, second
             if ("no" in ctx.update) {
-                conversation.skip({ next: true });
+                conversation.skip();
                 // @ts-expect-error mock
                 ctx.api.raw.sendMessage0({ one: ctx.update.one })
                     .then(() =>
@@ -456,7 +457,7 @@ describe("Conversation", () => {
                 await conversation.wait(); // never resolves due to skip
             }
             ctx = await conversation.wait();
-            conversation.skip({ next: true });
+            conversation.skip();
 
             // the conversation builder function should still wait for micro tasks to happen in case
             // @ts-expect-error mock

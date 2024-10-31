@@ -309,6 +309,7 @@ export interface ConversationHandled {
 }
 export interface ConversationSkipped {
     status: "skipped";
+    next: boolean;
 }
 
 export type ConversationBuilder<C extends Context> = (
@@ -382,13 +383,11 @@ export function createConversation<OC extends Context, C extends Context>(
         );
         switch (result.status) {
             case "complete":
+            case "skipped":
                 if (result.next) await next();
                 return;
             case "error":
                 throw result.error;
-            case "skipped":
-                await next();
-                return;
             case "handled":
                 return;
         }
@@ -402,7 +401,7 @@ export async function runParallelConversations<C extends Context>(
     data: ConversationData,
     options?: ResumeOptions<C>,
 ): Promise<ConversationResult> {
-    if (!(id in data)) return { status: "skipped" };
+    if (!(id in data)) return { status: "skipped", next: true };
     const states = data[id];
     const len = states.length;
     for (let i = 0; i < len; i++) {
@@ -410,7 +409,8 @@ export async function runParallelConversations<C extends Context>(
         const result = await resumeConversation(builder, base, state, options);
         switch (result.status) {
             case "skipped":
-                continue;
+                if (result.next) continue;
+                else return { status: "skipped", next: false };
             case "handled":
                 states[i].replay = result.replay;
                 states[i].interrupts = result.interrupts;
@@ -426,7 +426,7 @@ export async function runParallelConversations<C extends Context>(
                 return result;
         }
     }
-    return { status: "skipped" };
+    return { status: "skipped", next: true };
 }
 
 export type EnterResult =
@@ -522,6 +522,7 @@ export async function resumeConversation<C extends Context>(
     // skip the update (actually handles it in a meaningful way).
     const ints = state.interrupts;
     const len = ints.length;
+    let next = true;
     INTERRUPTS: for (let i = 0; i < len; i++) {
         const int = ints[i];
         const checkpoint = ReplayEngine.supply(replayState, int, update);
@@ -559,15 +560,16 @@ export async function resumeConversation<C extends Context>(
                         case "skip":
                             // current interrupt was skipped, replay again with the next
                             ReplayEngine.reset(replayState, checkpoint);
+                            next = true;
                             continue INTERRUPTS;
                         case "drop":
-                            // drop the update, do not modify the state
+                            // current interrupt was skipped, replay again with
+                            // the next and if this was the last iteration of
+                            // the loop, then tell the caller that downstream
+                            // middleware must be called
                             ReplayEngine.reset(replayState, checkpoint);
-                            return {
-                                status: "handled",
-                                replay: replayState,
-                                interrupts: ints,
-                            };
+                            next = false;
+                            continue INTERRUPTS;
                         case "halt":
                             // tell caller that we are done, all good
                             return { status: "complete", next: false };
@@ -579,14 +581,15 @@ export async function resumeConversation<C extends Context>(
                             throw new Error("invalid cancel message received"); // cannot happen
                     }
                 default:
+                    // cannot happen
                     throw new Error(
                         "engine returned invalid replay result type",
-                    ); // cannot happen
+                    );
             }
         } while (rewind);
     }
     // tell caller that we want to skip the update and did not modify the state
-    return { status: "skipped" };
+    return { status: "skipped", next };
 }
 
 function hydrateContext<C extends Context>(
