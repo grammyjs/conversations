@@ -20,23 +20,102 @@ import type {
     Voice,
 } from "./deps.deno.ts";
 
-export type Action<C extends Context> = (ctx: C) => unknown | Promise<unknown>;
-
-export type FormOptions<C extends Context> = Action<C> | FormConfig<C>;
+/**
+ * Options to pass to a form field. Can be either a {@link FormAction} function
+ * or a {@link FormConfig} object.
+ *
+ * @typeParam C A custom context type
+ */
+export type FormOptions<C extends Context> = FormAction<C> | FormConfig<C>;
+/**
+ * An action to perform after a context object was validated.
+ *
+ * @param ctx The current context object
+ * @typeParam C A custom context type
+ */
+export type FormAction<C extends Context> = (
+    ctx: C,
+) => unknown | Promise<unknown>;
+/**
+ * An options bag object for a form field.
+ *
+ * @typeParam C A custom context type
+ */
 export interface FormConfig<C extends Context> {
+    /**
+     * Determines whether [the outside middleware
+     * system](https://grammy.dev/guide/middleware) should resume after the
+     * update is skipped in case that form validation fails.
+     *
+     * Specify `next: true` to make sure that subsequent handlers will run. This
+     * effectively causes `next` to be called by the plugin.
+     *
+     * Defaults to `false` unless the conversation is marked as parallel, in
+     * which case this option defaults to `true`.
+     */
     next?: boolean;
+    /**
+     * Specifies a timeout for the wait call.
+     *
+     * When the form field is reached, `Date.now()` is called. When the form
+     * field resolves, `Date.now()` is called again, and the two values are
+     * compared. If the form field resolved more than the specified number of
+     * milliseconds after it was reached initially, then the conversation will
+     * be halted, any exit handlers will be called, and the surrounding
+     * middleware will resume normally so that subsequent handlers can run.
+     *
+     * To the outside middleware system, this will look like the conversation
+     * was never active.
+     */
     maxMilliseconds?: number;
+    /**
+     * Collation key for the wait call, safety measure to protect against data
+     * corruption. This is used extensively by the plugin internally, but it is
+     * rarely useful to changes this behavior.
+     */
     collationKey?: string;
-    action?: Action<C>;
-    otherwise?: Action<C>;
+    /**
+     * A form action to perform on the context object after the form validation
+     * succeeds for a context object, and before the respective value is
+     * returned form the form field.
+     */
+    action?: FormAction<C>;
+    /**
+     * Callback that will be invoked when the form validation fails for a
+     * context object.
+     */
+    otherwise?: FormAction<C>;
 }
 
+/** A value that may be absent */
 export type Maybe<T> = { ok: false } | { ok: true; value: T };
+/**
+ * An object that fully specifies how to build a form field.
+ *
+ * @typeParam C A custom context type
+ * @typeParam T The type of value this form field returns
+ */
 export interface FormBuilder<C extends Context, T> extends FormConfig<C> {
-    validate: (ctx: C) => Maybe<T> | Promise<Maybe<T>>;
+    /**
+     * A function that valiates a given context. When validation succeeds, a
+     * value can be extracted from the context object.
+     *
+     * The result of the validation as well as the data extraction needs to be
+     * encoded using a {@link Maybe} type.
+     *
+     * @param ctx A context object to validate
+     */
+    validate(ctx: C): Maybe<T> | Promise<Maybe<T>>;
 }
 
+/**
+ * A container for form building utilities.
+ *
+ * Each method on this class represents a differnt type of form field which can
+ * validate context objects and extract data from it.
+ */
 export class ConversationForm<C extends Context> {
+    /** Constructs a new form based on wait and skip callbacks */
     constructor(
         private readonly conversation: {
             wait: (
@@ -46,6 +125,16 @@ export class ConversationForm<C extends Context> {
         },
     ) {}
 
+    /**
+     * Generic form field that can be used to build any other type of form
+     * field. This is heavily used internally.
+     *
+     *  Most likely, you will not need this because there is a more convenient
+     *  option. However, you can still use it if the type of form field you need
+     *  is not supported out of the box.
+     *
+     * @param builder A form field definition object
+     */
     async build<T>(builder: FormBuilder<C, T>) {
         const { validate, action, otherwise, next, ...waitOptions } = builder;
         const ctx = await this.conversation.wait({
@@ -61,6 +150,16 @@ export class ConversationForm<C extends Context> {
             return await this.conversation.skip({ next });
         }
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with text, and returns this text as string. Does not check
+     * for captions.
+     *
+     * Accepts an optional options object that lets you perform actions when
+     * text is received, when a non-text update is received, and more.
+     *
+     * @param options Optional options
+     */
     async text(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-text",
@@ -72,6 +171,18 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with text that can be parsed to a number, and returns this
+     * number. Does not check captions.
+     *
+     * The conversion to number uses `parseFloat`.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * number is received, when a non-number update is received, and more.
+     *
+     * @param options Optional options
+     */
     async number(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-number",
@@ -85,7 +196,25 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
-    async int(options?: FormOptions<C> & { radix?: number }) {
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with text that can be parsed to an integer, and returns this
+     * integer as a `number`. Does not check for captions.
+     *
+     * The conversion to number uses `parseInt`.
+     *
+     * Accepts an optional options object that lets you specify the radix to use
+     * as well as perform actions when a number is received, when a non-number
+     * update is received, and more.
+     *
+     * @param options Optional options
+     */
+    async int(
+        options?: FormOptions<C> & {
+            /** The radix to use for parsing the integer */
+            radix?: number;
+        },
+    ) {
         const { radix, ...opts } = options ?? {};
         return await this.build({
             collationKey: "form-int",
@@ -99,6 +228,37 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with one of several predefined strings, and returns the
+     * actual text as string. Does not check captions.
+     *
+     * This is especially useful when working with custom keyboards.
+     *
+     * ```ts
+     * const keyboard = new Keyboard()
+     *   .text("A").text("B")
+     *   .text("C").text("D")
+     *   .oneTime()
+     * await ctx.reply("A, B, C, or D?", { reply_markup: keyboard })
+     * const answer = await conversation.form.select(["A", "B", "C", "D"], {
+     *   otherwise: ctx => ctx.reply("Please use one of the buttons!")
+     * })
+     * switch (answer) {
+     *   case "A":
+     *   case "B":
+     *   case "C":
+     *   case "D":
+     *   // ...
+     * }
+     * ```
+     *
+     * Accepts an optional options object that lets you perform actions when
+     * text is received, when a non-text update is received, and more.
+     *
+     * @param entries A string array of accepted values
+     * @param options Optional options
+     */
     async select<E extends string>(entries: E[], options?: FormOptions<C>) {
         const e: string[] = entries;
         return await this.build({
@@ -112,8 +272,20 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a given type of message entity, and returns this
+     * entity. The form field relies on `ctx.entities()` for data extraction, so
+     * both texts and captions are checked.
+     *
+     * Accepts an optional options object that lets you perform actions when
+     * text is received, when a non-text update is received, and more.
+     *
+     * @param type One or more types of message entities to accept
+     * @param options Optional options
+     */
     async entity<M extends MessageEntity>(
-        type: M["type"],
+        type: M["type"] | M["type"][],
         options?: FormOptions<C>,
     ) {
         return await this.build({
@@ -126,6 +298,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with an animation, and returns the received animation
+     * object.
+     *
+     * Accepts an optional options object that lets you perform actions when an
+     * animation is received, when a non-animation update is received, and more.
+     *
+     * @param options Optional options
+     */
     async animation(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-animation",
@@ -137,6 +319,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with an audio message, and returns the received audio
+     * object.
+     *
+     * Accepts an optional options object that lets you perform actions when an
+     * audio message is received, when a non-audio update is received, and more.
+     *
+     * @param options Optional options
+     */
     async audio(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-audio",
@@ -148,6 +340,17 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a document message, and returns the received document
+     * object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * document message is received, when a non-document update is received, and
+     * more.
+     *
+     * @param options Optional options
+     */
     async document(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-document",
@@ -159,6 +362,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with paid media, and returns the received paid media object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * paid media message is received, when a non-paid media update is received,
+     * and more.
+     *
+     * @param options Optional options
+     */
     async paidMedia(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-paid_media",
@@ -170,6 +383,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a photo, and returns the received array of `PhotoSize`
+     * objects.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * photo is received, when a non-photo update is received, and more.
+     *
+     * @param options Optional options
+     */
     async photo(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-photo",
@@ -181,6 +404,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a sticker, and returns the received sticker object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * sticker is received, when a non-sticker update is received, and more.
+     *
+     * @param options Optional options
+     */
     async sticker(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-sticker",
@@ -192,6 +424,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a story, and returns the received story object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * story is received, when a non-story update is received, and more.
+     *
+     * @param options Optional options
+     */
     async story(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-story",
@@ -203,6 +444,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a video, and returns the received video object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * video is received, when a non-video update is received, and more.
+     *
+     * @param options Optional options
+     */
     async video(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-video",
@@ -214,6 +464,17 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a video note, and returns the received video note
+     * object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * video note is received, when a non-video note update is received, and
+     * more.
+     *
+     * @param options Optional options
+     */
     async video_note(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-video_note",
@@ -225,6 +486,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a voice message, and returns the received voice object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * voice message is received, when a non-voice message update is received,
+     * and more.
+     *
+     * @param options Optional options
+     */
     async voice(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-voice",
@@ -236,6 +507,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a contact, and returns the received contact object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * contact is received, when a non-contact update is received, and more.
+     *
+     * @param options Optional options
+     */
     async contact(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-contact",
@@ -247,6 +527,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with dice, and returns the received dice object.
+     *
+     * Accepts an optional options object that lets you perform actions when
+     * dice are received, when a non-dice update is received, and more.
+     *
+     * @param options Optional options
+     */
     async dice(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-dice",
@@ -258,6 +547,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a game, and returns the received game object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * game is received, when a non-game update is received, and more.
+     *
+     * @param options Optional options
+     */
     async game(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-game",
@@ -269,6 +567,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a poll, and returns the received poll object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * poll is received, when a non-poll update is received, and more.
+     *
+     * @param options Optional options
+     */
     async poll(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-poll",
@@ -280,6 +587,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a venue, and returns the received venue object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * venue is received, when a non-venue update is received, and more.
+     *
+     * @param options Optional options
+     */
     async venue(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-venue",
@@ -291,6 +607,15 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a location, and returns the received location object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * location is received, when a non-location update is received, and more.
+     *
+     * @param options Optional options
+     */
     async location(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-location",
@@ -302,6 +627,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a photo or video, and returns the received media
+     * object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * media is received, when a non-media update is received, and more.
+     *
+     * @param options Optional options
+     */
     async media(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-location",
@@ -314,6 +649,16 @@ export class ConversationForm<C extends Context> {
             },
         });
     }
+    /**
+     * Form field that checks if the incoming update contains a message or
+     * channel post with a file, calls `getFile`, and returns the received file
+     * object.
+     *
+     * Accepts an optional options object that lets you perform actions when a
+     * file is received, when a non-file update is received, and more.
+     *
+     * @param options Optional options
+     */
     async file(options?: FormOptions<C>) {
         return await this.build({
             collationKey: "form-location",
