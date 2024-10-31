@@ -26,7 +26,7 @@ import {
 } from "@grammyjs/conversations";
 
 type MyContext = ConversationFlavor<Context>;
-type MyConversationContext = HydrateFlavor<Context>;
+type MyConversationContext = Context;
 
 type MyConversation = Conversation<MyConversationContext>;
 
