@@ -514,6 +514,46 @@ describe("Conversation", () => {
         ]);
         await end.promise;
     });
+    it("should skip concurrent wait calls", async () => {
+        let i = 0;
+        async function convo(conversation: Convo) {
+            const zero = conversation.wait();
+            const one = conversation.wait();
+            const p0 = zero.then(async ({ update }) => {
+                if (update.message?.text !== "zero") {
+                    await conversation.skip();
+                }
+            });
+            const p1 = one.then(async ({ update }) => {
+                if (update.message?.text !== "one") {
+                    await conversation.skip();
+                }
+                i++;
+            });
+            await Promise.all([p0, p1]);
+            i++;
+        }
+
+        const first = await enterConversation(convo, mkctx({ initial: true }));
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const args = first.args;
+        const second = await resumeConversation(
+            convo,
+            mkctx({ message: { text: "one" } }),
+            { ...first, args },
+        );
+        assertEquals(second.status, "handled");
+        assert(second.status === "handled");
+        const third = await resumeConversation(
+            convo,
+            mkctx({ message: { text: "zero" } }),
+            { ...second, args },
+        );
+        assertEquals(third.status, "complete");
+        assert(third.status === "complete");
+        assertEquals(i, 3);
+    });
     it("should prevent nested calls to external", async () => {
         const ctx = mkctx();
         let i = 0;
