@@ -536,7 +536,7 @@ export function conversations<OC extends Context, C extends Context>(
             Object.defineProperty(ctx, internalCompletenessMarker, {
                 value: true,
             });
-            if (!read) {
+            if (read) {
                 // In case of bad usage of async/await, it is possible that
                 // `next` resolves while an enter call is still running. It then
                 // may not have cleaned up its data, leaving behind empty arrays
