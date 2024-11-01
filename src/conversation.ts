@@ -151,7 +151,7 @@ export interface AndOtherwiseOptions<C extends Context> extends SkipOptions {
      *
      * @param ctx The context object that failed validation
      */
-    otherwise?: (ctx: C) => unknown | Promise<unknown>;
+    otherwise?(ctx: C): unknown | Promise<unknown>;
 }
 
 /**

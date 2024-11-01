@@ -168,7 +168,7 @@ export interface ConversationKeyStorage<C extends Context, S> {
     /** An optional version for the data, defaults to `0` */
     version?: string | number;
     /** An optional storage key function, defaults to `ctx.chatId` */
-    getStorageKey?: (ctx: C) => string | undefined;
+    getStorageKey?(ctx: C): string | undefined;
     /** The underlying storage that defines how to read and write raw data */
     adapter: VersionedStateStorage<string, S>;
 }
