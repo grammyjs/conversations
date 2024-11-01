@@ -1,8 +1,10 @@
 import {
     Composer,
     type Context,
+    type CopyTextButton,
     type Filter,
     type InlineKeyboardButton,
+    type InlineKeyboardMarkup,
     type LoginUrl,
     type Middleware,
     type SwitchInlineQueryChosenChat,
@@ -434,6 +436,14 @@ export class ConversationMenuRange<C extends Context> {
     ) {
         return this.add({ text, switch_inline_query_chosen_chat: query });
     }
+    copyText(text: string, copyText: string | CopyTextButton) {
+        return this.add({
+            text,
+            copy_text: typeof copyText === "string"
+                ? { text: copyText }
+                : copyText,
+        });
+    }
     game(text: MaybeDynamicString<C>) {
         return this.add({ text, callback_game: {} });
     }
@@ -518,7 +528,8 @@ export class ConversationMenuRange<C extends Context> {
 }
 
 export class ConversationMenu<C extends Context>
-    extends ConversationMenuRange<C> {
+    extends ConversationMenuRange<C>
+    implements InlineKeyboardMarkup {
     [opts]: ConversationMenuOptions<C>;
     constructor(
         public readonly id: string,
