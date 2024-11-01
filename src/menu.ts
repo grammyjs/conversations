@@ -188,7 +188,7 @@ export class ConversationMenuPool<C extends Context> {
         // Provide payload on `ctx.match` if it is not empty
         if (payload) ctx.match = payload;
         const nav = async (
-            { immediate }: Immediate = {},
+            { immediate }: { immediate?: boolean } = {},
             menu?: ConversationMenu<C>,
         ) => {
             const chat = ctx.chatId;
@@ -324,9 +324,6 @@ function parseId(data: string) {
 export interface ConversationMenuFlavor {
     match?: string;
     menu: ConversationMenuControlPanel;
-}
-export interface Immediate {
-    immediate?: boolean;
 }
 export interface ConversationMenuControlPanel {
     update(config: { immediate: true }): Promise<void>;
