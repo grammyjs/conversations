@@ -39,7 +39,7 @@ export type ButtonHandler<C extends Context> = (
 ) => unknown | Promise<unknown>;
 
 export interface ConversationMenuOptions<C extends Context> {
-    parent?: string;
+    parent?: string | { id: string };
     autoAnswer: boolean;
     fingerprint: DynamicString<C>;
 }
@@ -85,14 +85,15 @@ export class ConversationMenuPool<C extends Context> {
         return menu;
     }
 
-    lookup(id: string) {
-        const menu = this.index.get(id);
+    lookup(id: string | { id: string }) {
+        const idString = typeof id === "string" ? id : id.id;
+        const menu = this.index.get(idString);
         if (menu === undefined) {
             const validIds = Array.from(this.index.keys())
                 .map((k) => `'${k}'`)
                 .join(", ");
             throw new Error(
-                `Menu '${id}' is not known! Known menus are: ${validIds}`,
+                `Menu '${idString}' is not known! Known menus are: ${validIds}`,
             );
         }
         return menu;
@@ -334,8 +335,11 @@ export interface ConversationMenuControlPanel {
     close(config?: { immediate?: false }): void;
     back(config: { immediate: true }): Promise<void>;
     back(config?: { immediate?: false }): void;
-    nav(to: string, config: { immediate: true }): Promise<void>;
-    nav(to: string, config?: { immediate?: false }): void;
+    nav(
+        to: string | { id: string },
+        config: { immediate: true },
+    ): Promise<void>;
+    nav(to: string | { id: string }, config?: { immediate?: false }): void;
 }
 export type ConversationMenuContext<C extends Context> =
     & Filter<C, "callback_query:data">
@@ -452,22 +456,22 @@ export class ConversationMenuRange<C extends Context> {
     }
     submenu(
         text: MaybeDynamicString<C>,
-        menu: string,
+        menu: string | { id: string },
         ...middleware: ConversationMenuMiddleware<C>[]
     ): this;
     submenu(
         text: TextAndPayload<C>,
-        menu: string,
+        menu: string | { id: string },
         ...middleware: ConversationMenuMiddleware<C & { match: string }>[]
     ): this;
     submenu(
         text: MaybePayloadString<C>,
-        menu: string,
+        menu: string | { id: string },
         ...middleware: ConversationMenuMiddleware<C>[]
     ): this;
     submenu(
         text: MaybePayloadString<C>,
-        menu: string,
+        menu: string | { id: string },
         ...middleware: ConversationMenuMiddleware<C>[]
     ) {
         return this.text(
