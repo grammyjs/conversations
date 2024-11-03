@@ -21,27 +21,90 @@ import type {
 } from "./deps.deno.ts";
 
 /**
- * Options to pass to a form field. Can be either a {@link FormAction} function
- * or a {@link FormConfig} object.
+ * An action to perform after a context object passed form valiation.
  *
+ * A form action receives the validated context object as the first argument. It
+ * receives the extracted value as a second argument.
+ *
+ * @param ctx The current context object
  * @typeParam C A custom context type
+ * @typeParam T A value extracted by the validation function
  */
-export type FormOptions<C extends Context> = FormAction<C> | FormConfig<C>;
+export type FormAction<C extends Context, T> = (
+    ctx: C,
+    result: T,
+) => unknown | Promise<unknown>;
 /**
- * An action to perform after a context object was validated.
+ * A callback function to be invoked after a context object failed form
+ * validation.
+ *
+ * A form action receives the rejected context object as the first argument.
+ *
+ * If validation fails and an error is specified, it is possible to use
+ * {@link OtherwiseWithReason} instead.
  *
  * @param ctx The current context object
  * @typeParam C A custom context type
  */
-export type FormAction<C extends Context> = (
+export type Otherwise<C extends Context> = (
     ctx: C,
 ) => unknown | Promise<unknown>;
 /**
- * An options bag object for a form field.
+ * A callback function to be invoked after a context object failed form
+ * validation.
+ *
+ * A form action receives the rejected context object as the first argument.
+ *
+ * If validation fails and a reason is specified as an error of the
+ * {@link Result} return value of the validation function, the form action
+ * receives the error as a second argument. If no reason was specified, use
+ * {@link Otherwise} instead.
+ *
+ * @param ctx The current context object
+ * @typeParam C A custom context type
+ * @typeParam C A custom context type
+ * @typeParam T A value extracted by the validation function
+ */
+export type OtherwiseWithReason<C extends Context, R> = (
+    ctx: C,
+    reason: R,
+) => unknown | Promise<unknown>;
+/**
+ * A base options bag object for a form field. This holds all properties that
+ * are common among {@link FormConfig} and {@link FormConfigWithReason}.
  *
  * @typeParam C A custom context type
+ * @typeParam T A form field type
  */
-export interface FormConfig<C extends Context> {
+/**
+ * Options to pass to a form field. Can be either a {@link FormAction} function
+ * or a {@link FormConfig} object.
+ *
+ * If the validation function is able to provide a reason as to why validation
+ * has failed, it is possible use {@link FormOptionsWithReason} instead.
+ *
+ * @typeParam C A custom context type
+ * @typeParam C A form field type
+ */
+export type FormOptions<C extends Context, T> =
+    | FormAction<C, T>
+    | FormConfig<C, T>;
+/**
+ * Options to pass to a form field with an enhanced validation function that can
+ * provide a reason as to why validation has failed. Can be either a
+ * {@link FormAction} function or a {@link FormConfigWithReason} object.
+ *
+ * If the validation function does not provide a reason, use {@link FormOptions}
+ * instead.
+ *
+ * @typeParam C A custom context type
+ * @typeParam T A type of success value for the validation function
+ * @typeParam R A type of error value for the validation function
+ */
+export type FormOptionsWithReason<C extends Context, T, R> =
+    | FormAction<C, T>
+    | FormConfigWithReason<C, T, R>;
+export interface FormConfigShared<C extends Context, T> {
     /**
      * Determines whether [the outside middleware
      * system](https://grammy.dev/guide/middleware) should resume after the
@@ -79,33 +142,102 @@ export interface FormConfig<C extends Context> {
      * succeeds for a context object, and before the respective value is
      * returned form the form field.
      */
-    action?: FormAction<C>;
+    action?: FormAction<C, T>;
+}
+/**
+ * An options bag object for a form field. Contains all properties of
+ * {@link FormConfigShared} as well as an `otherwise` function to be invoked
+ * when form valiation fails.
+ *
+ * If a reason is specified by the form validation, it is possible to use
+ * {@link FormConfigWithReason} instead.
+ *
+ * @typeParam C A custom context type
+ * @typeParam T A form field type
+ */
+export interface FormConfig<C extends Context, T>
+    extends FormConfigShared<C, T> {
     /**
      * Callback that will be invoked when the form validation fails for a
      * context object.
      */
-    otherwise?: FormAction<C>;
+    otherwise?: Otherwise<C>;
+}
+/**
+ * An options bag object for a form field. Contains all properties of
+ * {@link FormConfigShared} as well as an `otherwise` function to be invoked
+ * when form valiation fails with a known reason.
+ *
+ * If no reason is specified by the form validation, use {@link FormConfig}
+ * instead.
+ *
+ * @typeParam C A custom context type
+ * @typeParam T A type of success value for the validation function
+ * @typeParam R A type of error value for the validation function
+ */
+export interface FormConfigWithReason<C extends Context, T, R>
+    extends FormConfigShared<C, T> {
+    /**
+     * Callback that will be invoked when the form validation fails with a
+     * reason for a context object.
+     */
+    otherwise?: OtherwiseWithReason<C, R>;
 }
 
 /** A value that may be absent */
 export type Maybe<T> = { ok: false } | { ok: true; value: T };
+/** A value or an error */
+export type Result<T, E> = { ok: false; error: E } | { ok: true; value: T };
 /**
  * An object that fully specifies how to build a form field.
+ *
+ * Contains as properties of {@link FormConfig} as well as a function that can
+ * validate context objects.
+ *
+ * If the validation function can provide a reason as to why validation has
+ * failed, it is possible to use {@link FormBuilderWithReason} instead.
  *
  * @typeParam C A custom context type
  * @typeParam T The type of value this form field returns
  */
-export interface FormBuilder<C extends Context, T> extends FormConfig<C> {
+export interface FormBuilder<C extends Context, T> extends FormConfig<C, T> {
     /**
-     * A function that valiates a given context. When validation succeeds, a
-     * value can be extracted from the context object.
+     * A function that validates a given context.
      *
-     * The result of the validation as well as the data extraction needs to be
-     * encoded using a {@link Maybe} type.
+     * When validation succeeds, a value can be extracted from the context
+     * object. The result of the validation as well as the data extraction needs
+     * to be encoded using a {@link Maybe} type.
      *
      * @param ctx A context object to validate
      */
     validate(ctx: C): Maybe<T> | Promise<Maybe<T>>;
+}
+/**
+ * An object that fully specifies how to build a form field.
+ *
+ * Contains as properties of {@link FormConfigWithReason} as well as a function
+ * that can validate context objects. If a context object does not pass
+ * validation, the validation function is able to provide a reason.
+ *
+ * If the validation function cannot provide reason as to why validation has
+ * failed, it is possible to use {@link FormBuilder} instead.
+ *
+ * @typeParam C A custom context type
+ * @typeParam T A type of success value for the validation function
+ * @typeParam R A type of error value for the validation function
+ */
+export interface FormBuilderWithReason<C extends Context, T, R>
+    extends FormConfigWithReason<C, T, R> {
+    /**
+     * A function that validates a given context.
+     *
+     * When validation succeeds, a value can be extracted from the context
+     * object. When validation fails, an error can be generated. The result of
+     * the validation needs to be encoded using a {@link Result} type.
+     *
+     * @param ctx A context object to validate
+     */
+    validate(ctx: C): Result<T, R> | Promise<Result<T, R>>;
 }
 
 /**
@@ -134,19 +266,34 @@ export class ConversationForm<C extends Context> {
      *  is not supported out of the box.
      *
      * @param builder A form field definition object
+     * @typeParam T A type of value to be extracted from the form field
+     * @typeParam R A type of reason to be specified if validation fails
      */
-    async build<T>(builder: FormBuilder<C, T>) {
+    async build<T, R>(builder: FormBuilderWithReason<C, T, R>): Promise<T>;
+    async build<T, R>(builder: FormBuilder<C, T>): Promise<T>;
+    async build<T, R>(
+        builder: FormBuilder<C, T> | FormBuilderWithReason<C, T, R>,
+    ) {
         const { validate, action, otherwise, next, ...waitOptions } = builder;
         const ctx = await this.conversation.wait({
             collationKey: "form",
             ...waitOptions,
         });
-        const result = await validate(ctx);
+        const result: Maybe<T> | Result<T, R> = await validate(ctx);
         if (result.ok) {
-            if (action !== undefined) await action(ctx);
+            if (action !== undefined) await action(ctx, result.value);
             return result.value;
         } else {
-            if (otherwise !== undefined) await otherwise(ctx);
+            if (otherwise !== undefined) {
+                if ("error" in result) {
+                    const callback = otherwise;
+                    const reason = result.error as R;
+                    await callback(ctx, reason);
+                } else {
+                    const callback = otherwise as FormBuilder<C, T>["validate"];
+                    await callback(ctx);
+                }
+            }
             return await this.conversation.skip({ next });
         }
     }
@@ -160,11 +307,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async text(options?: FormOptions<C>) {
+    async text(options?: FormOptions<C, string>) {
         return await this.build({
             collationKey: "form-text",
             ...options,
-            validate: (ctx): Maybe<string> => {
+            validate: (ctx) => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
                 if (text === undefined) return { ok: false };
                 return { ok: true, value: text };
@@ -183,11 +330,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async number(options?: FormOptions<C>) {
+    async number(options?: FormOptions<C, number>) {
         return await this.build({
             collationKey: "form-number",
             ...options,
-            validate: (ctx): Maybe<number> => {
+            validate: (ctx) => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
                 if (text === undefined) return { ok: false };
                 const num = parseFloat(text);
@@ -210,7 +357,7 @@ export class ConversationForm<C extends Context> {
      * @param options Optional options
      */
     async int(
-        options?: FormOptions<C> & {
+        options?: FormOptions<C, number> & {
             /** The radix to use for parsing the integer */
             radix?: number;
         },
@@ -219,7 +366,7 @@ export class ConversationForm<C extends Context> {
         return await this.build({
             collationKey: "form-int",
             ...opts,
-            validate: (ctx): Maybe<number> => {
+            validate: (ctx) => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
                 if (text === undefined) return { ok: false };
                 const num = parseInt(text, radix);
@@ -259,12 +406,12 @@ export class ConversationForm<C extends Context> {
      * @param entries A string array of accepted values
      * @param options Optional options
      */
-    async select<E extends string>(entries: E[], options?: FormOptions<C>) {
+    async select<E extends string>(entries: E[], options?: FormOptions<C, E>) {
         const e: string[] = entries;
         return await this.build({
             collationKey: "form-select",
             ...options,
-            validate: (ctx): Maybe<E> => {
+            validate: (ctx) => {
                 const text = (ctx.message ?? ctx.channelPost)?.text;
                 if (text === undefined) return { ok: false };
                 if (!e.includes(text)) return { ok: false };
@@ -286,12 +433,12 @@ export class ConversationForm<C extends Context> {
      */
     async entity<M extends MessageEntity>(
         type: M["type"] | M["type"][],
-        options?: FormOptions<C>,
+        options?: FormOptions<C, MessageEntity & { text: string }>,
     ) {
         return await this.build({
             collationKey: "form-entity",
             ...options,
-            validate: (ctx): Maybe<MessageEntity & { text: string }> => {
+            validate: (ctx) => {
                 const entities = ctx.entities(type);
                 if (entities.length === 0) return { ok: false };
                 return { ok: true, value: entities[0] };
@@ -308,11 +455,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async animation(options?: FormOptions<C>) {
+    async animation(options?: FormOptions<C, Animation>) {
         return await this.build({
             collationKey: "form-animation",
             ...options,
-            validate: (ctx): Maybe<Animation> => {
+            validate: (ctx) => {
                 const animation = (ctx.message ?? ctx.channelPost)?.animation;
                 if (animation === undefined) return { ok: false };
                 return { ok: true, value: animation };
@@ -329,11 +476,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async audio(options?: FormOptions<C>) {
+    async audio(options?: FormOptions<C, Audio>) {
         return await this.build({
             collationKey: "form-audio",
             ...options,
-            validate: (ctx): Maybe<Audio> => {
+            validate: (ctx) => {
                 const audio = (ctx.message ?? ctx.channelPost)?.audio;
                 if (audio === undefined) return { ok: false };
                 return { ok: true, value: audio };
@@ -351,11 +498,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async document(options?: FormOptions<C>) {
+    async document(options?: FormOptions<C, Document>) {
         return await this.build({
             collationKey: "form-document",
             ...options,
-            validate: (ctx): Maybe<Document> => {
+            validate: (ctx) => {
                 const document = (ctx.message ?? ctx.channelPost)?.document;
                 if (document === undefined) return { ok: false };
                 return { ok: true, value: document };
@@ -372,11 +519,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async paidMedia(options?: FormOptions<C>) {
+    async paidMedia(options?: FormOptions<C, PaidMediaInfo>) {
         return await this.build({
             collationKey: "form-paid_media",
             ...options,
-            validate: (ctx): Maybe<PaidMediaInfo> => {
+            validate: (ctx) => {
                 const paid_media = (ctx.message ?? ctx.channelPost)?.paid_media;
                 if (paid_media === undefined) return { ok: false };
                 return { ok: true, value: paid_media };
@@ -393,11 +540,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async photo(options?: FormOptions<C>) {
+    async photo(options?: FormOptions<C, PhotoSize[]>) {
         return await this.build({
             collationKey: "form-photo",
             ...options,
-            validate: (ctx): Maybe<PhotoSize[]> => {
+            validate: (ctx) => {
                 const photo = (ctx.message ?? ctx.channelPost)?.photo;
                 if (photo === undefined) return { ok: false };
                 return { ok: true, value: photo };
@@ -413,11 +560,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async sticker(options?: FormOptions<C>) {
+    async sticker(options?: FormOptions<C, Sticker>) {
         return await this.build({
             collationKey: "form-sticker",
             ...options,
-            validate: (ctx): Maybe<Sticker> => {
+            validate: (ctx) => {
                 const sticker = (ctx.message ?? ctx.channelPost)?.sticker;
                 if (sticker === undefined) return { ok: false };
                 return { ok: true, value: sticker };
@@ -433,11 +580,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async story(options?: FormOptions<C>) {
+    async story(options?: FormOptions<C, Story>) {
         return await this.build({
             collationKey: "form-story",
             ...options,
-            validate: (ctx): Maybe<Story> => {
+            validate: (ctx) => {
                 const story = (ctx.message ?? ctx.channelPost)?.story;
                 if (story === undefined) return { ok: false };
                 return { ok: true, value: story };
@@ -453,11 +600,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async video(options?: FormOptions<C>) {
+    async video(options?: FormOptions<C, Video>) {
         return await this.build({
             collationKey: "form-video",
             ...options,
-            validate: (ctx): Maybe<Video> => {
+            validate: (ctx) => {
                 const video = (ctx.message ?? ctx.channelPost)?.video;
                 if (video === undefined) return { ok: false };
                 return { ok: true, value: video };
@@ -475,11 +622,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async video_note(options?: FormOptions<C>) {
+    async video_note(options?: FormOptions<C, VideoNote>) {
         return await this.build({
             collationKey: "form-video_note",
             ...options,
-            validate: (ctx): Maybe<VideoNote> => {
+            validate: (ctx) => {
                 const video_note = (ctx.message ?? ctx.channelPost)?.video_note;
                 if (video_note === undefined) return { ok: false };
                 return { ok: true, value: video_note };
@@ -496,11 +643,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async voice(options?: FormOptions<C>) {
+    async voice(options?: FormOptions<C, Voice>) {
         return await this.build({
             collationKey: "form-voice",
             ...options,
-            validate: (ctx): Maybe<Voice> => {
+            validate: (ctx) => {
                 const voice = (ctx.message ?? ctx.channelPost)?.voice;
                 if (voice === undefined) return { ok: false };
                 return { ok: true, value: voice };
@@ -516,11 +663,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async contact(options?: FormOptions<C>) {
+    async contact(options?: FormOptions<C, Contact>) {
         return await this.build({
             collationKey: "form-contact",
             ...options,
-            validate: (ctx): Maybe<Contact> => {
+            validate: (ctx) => {
                 const contact = (ctx.message ?? ctx.channelPost)?.contact;
                 if (contact === undefined) return { ok: false };
                 return { ok: true, value: contact };
@@ -536,11 +683,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async dice(options?: FormOptions<C>) {
+    async dice(options?: FormOptions<C, Dice>) {
         return await this.build({
             collationKey: "form-dice",
             ...options,
-            validate: (ctx): Maybe<Dice> => {
+            validate: (ctx) => {
                 const dice = (ctx.message ?? ctx.channelPost)?.dice;
                 if (dice === undefined) return { ok: false };
                 return { ok: true, value: dice };
@@ -556,11 +703,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async game(options?: FormOptions<C>) {
+    async game(options?: FormOptions<C, Game>) {
         return await this.build({
             collationKey: "form-game",
             ...options,
-            validate: (ctx): Maybe<Game> => {
+            validate: (ctx) => {
                 const game = (ctx.message ?? ctx.channelPost)?.game;
                 if (game === undefined) return { ok: false };
                 return { ok: true, value: game };
@@ -576,11 +723,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async poll(options?: FormOptions<C>) {
+    async poll(options?: FormOptions<C, Poll>) {
         return await this.build({
             collationKey: "form-poll",
             ...options,
-            validate: (ctx): Maybe<Poll> => {
+            validate: (ctx) => {
                 const poll = (ctx.message ?? ctx.channelPost)?.poll;
                 if (poll === undefined) return { ok: false };
                 return { ok: true, value: poll };
@@ -596,11 +743,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async venue(options?: FormOptions<C>) {
+    async venue(options?: FormOptions<C, Venue>) {
         return await this.build({
             collationKey: "form-venue",
             ...options,
-            validate: (ctx): Maybe<Venue> => {
+            validate: (ctx) => {
                 const venue = (ctx.message ?? ctx.channelPost)?.venue;
                 if (venue === undefined) return { ok: false };
                 return { ok: true, value: venue };
@@ -616,11 +763,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async location(options?: FormOptions<C>) {
+    async location(options?: FormOptions<C, Location>) {
         return await this.build({
             collationKey: "form-location",
             ...options,
-            validate: (ctx): Maybe<Location> => {
+            validate: (ctx) => {
                 const location = (ctx.message ?? ctx.channelPost)?.location;
                 if (location === undefined) return { ok: false };
                 return { ok: true, value: location };
@@ -637,11 +784,11 @@ export class ConversationForm<C extends Context> {
      *
      * @param options Optional options
      */
-    async media(options?: FormOptions<C>) {
+    async media(options?: FormOptions<C, PhotoSize[] | Video>) {
         return await this.build({
             collationKey: "form-location",
             ...options,
-            validate: (ctx): Maybe<PhotoSize[] | Video> => {
+            validate: (ctx) => {
                 const msg = ctx.message ?? ctx.channelPost;
                 const media = msg?.photo ?? msg?.video;
                 if (media === undefined) return { ok: false };
@@ -651,19 +798,19 @@ export class ConversationForm<C extends Context> {
     }
     /**
      * Form field that checks if the incoming update contains a message or
-     * channel post with a file, calls `getFile`, and returns the received file
-     * object.
+     * channel post with a file, calls `await ctx.getFile()`, and returns the
+     * received file object.
      *
      * Accepts an optional options object that lets you perform actions when a
      * file is received, when a non-file update is received, and more.
      *
      * @param options Optional options
      */
-    async file(options?: FormOptions<C>) {
+    async file(options?: FormOptions<C, File>) {
         return await this.build({
             collationKey: "form-location",
             ...options,
-            validate: async (ctx): Promise<Maybe<File>> => {
+            validate: async (ctx) => {
                 if (!ctx.has(":file")) return { ok: false };
                 const file = await ctx.getFile();
                 return { ok: true, value: file };
