@@ -23,6 +23,7 @@ import {
     assertNotStrictEquals,
     assertRejects,
     assertSpyCall,
+    assertSpyCallArg,
     assertSpyCalls,
     assertStrictEquals,
     assertThrows,
@@ -278,7 +279,7 @@ describe("createConversation", () => {
         assertEquals(i, 2);
         assertEquals(j, 0);
         assertSpyCalls(onExit, 1);
-        assertSpyCall(onExit, 0, { args: ["convo"] });
+        assertSpyCallArg(onExit, 0, 0, "convo");
     });
     it("should continue if default wait timeouts do not kick in", async () => {
         const onExit = spy(() => {});
@@ -332,7 +333,7 @@ describe("createConversation", () => {
         assertEquals(i, 2);
         assertEquals(j, 0);
         assertSpyCalls(onExit, 1);
-        assertSpyCall(onExit, 0, { args: ["convo"] });
+        assertSpyCallArg(onExit, 0, 0, "convo");
     });
     it("should continue if wait timeouts do not kick in", async () => {
         const onExit = spy(() => {});
@@ -1176,11 +1177,11 @@ describe("createConversation", () => {
                     targets.filter((x) => x !== targets[targetIndex]),
                 );
                 assertSpyCalls(onEnter, 3);
-                assertSpyCall(onEnter, 0, { args: ["convo"] });
-                assertSpyCall(onEnter, 1, { args: ["convo"] });
-                assertSpyCall(onEnter, 2, { args: ["convo"] });
+                assertSpyCallArg(onEnter, 0, 0, "convo");
+                assertSpyCallArg(onEnter, 1, 0, "convo");
+                assertSpyCallArg(onEnter, 2, 0, "convo");
                 assertSpyCalls(onExit, 1);
-                assertSpyCall(onExit, 0, { args: ["convo"] });
+                assertSpyCallArg(onExit, 0, 0, "convo");
             });
         }
         it("should support exiting a conversation while entering it", async () => {
