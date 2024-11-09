@@ -336,6 +336,13 @@ First return your data from `external` and then resume update handling using `wa
      *
      * This checkpoint can be passed to `rewind` in order to go back in the
      * conversation and resume it from an earlier point.
+     *
+     * ```ts
+     * const check = conversation.checkpoint();
+     *
+     * // Later:
+     * await conversation.rewind(check);
+     * ```
      */
     checkpoint(): Checkpoint {
         return this.controls.checkpoint();
@@ -344,6 +351,13 @@ First return your data from `external` and then resume update handling using `wa
      * Rewinds the conversation to a previous point and continues execution from
      * there. This point is specified by a checkpoint that can be created by
      * calling {@link Conversation.checkpoint}.
+     *
+     * ```ts
+     * const check = conversation.checkpoint();
+     *
+     * // Later:
+     * await conversation.rewind(check);
+     * ```
      *
      * @param checkpoint A previously created checkpoint
      */
