@@ -81,7 +81,7 @@ export interface ExternalOp<OC extends Context, R, I = any> {
     afterLoadError?(value: unknown): unknown | Promise<unknown>;
 }
 /** A function that applies a context object to a callback */
-type ApplyContext = <F extends (ctx: Context) => unknown>(
+type ApplyContext<OC extends Context> = <F extends (ctx: OC) => unknown>(
     fn: F,
 ) => Promise<ReturnType<F>>;
 
@@ -196,7 +196,7 @@ export interface HaltOptions {
  * Be sure to consult this plugin's documentation:
  * https://grammy.dev/plugins/conversations
  */
-export class Conversation<C extends Context = Context> {
+export class Conversation<OC extends Context, C extends Context> {
     /** `true` if `external` is currently running, `false` otherwise */
     private insideExternal = false;
 
@@ -220,7 +220,7 @@ export class Conversation<C extends Context = Context> {
     constructor(
         private controls: ReplayControls,
         private hydrate: (update: Update) => C,
-        private escape: ApplyContext,
+        private escape: ApplyContext<OC>,
         private plugins: MiddlewareFn<C>,
         private options: ConversationHandleOptions,
     ) {}
@@ -417,20 +417,15 @@ First return your data from `external` and then resume update handling using `wa
      *
      * ```ts
      * // Read from session
-     * const data = await conversation.external((ctx: MyContext) => {
+     * const data = await conversation.external((ctx) => {
      *   return ctx.session.data
      * })
      *
      * // Write to session
-     * await conversation.external((ctx: MyContext) => {
+     * await conversation.external((ctx) => {
      *   ctx.session.data = data
      * })
      * ```
-     *
-     * Be careful: you must annotate `ctx` manually. **This is an unsafe
-     * annotation and relies on a type cast internally!** The conversations
-     * plugin is not able to infer the type of the outside context object
-     * anymore. Messing this up can lead to runtime errors.
      *
      * Note that while a call to `external` is running, you cannot do any of the
      * following things.
@@ -458,14 +453,14 @@ First return your data from `external` and then resume update handling using `wa
      * })
      * ```
      *
-     * Note now we read a bigint from the database, but we convert it to string
+     * Note how we read a bigint from the internet, but we convert it to string
      * during persistence. This now allows us to use a storage adapter that only
      * handles strings but does not need to support the bigint type.
      *
      * @param op An operation to perform outside of the conversation
      */
     // deno-lint-ignore no-explicit-any
-    async external<OC extends Context, R, I = any>(
+    async external<R, I = any>(
         op: ExternalOp<OC, R, I>["task"] | ExternalOp<OC, R, I>,
     ): Promise<R> {
         // Make sure that no other ops are performed concurrently (or from
@@ -499,7 +494,7 @@ First return your data from `external` and then resume update handling using `wa
                 // to work with for bot developers. The benefits of this
                 // massively reduced complexity outweight the potential benefits
                 // of slightly stricter types for `external`.
-                const ret = await this.escape((ctx) => task(ctx as OC));
+                const ret = await this.escape((ctx) => task(ctx));
                 return { ok: true, ret: await beforeStore(ret) } as const;
             } catch (e) {
                 return { ok: false, err: await beforeStoreError(e) } as const;

@@ -9,7 +9,7 @@
  *
  * The status flag `isResolved` indicates if `resolve` has been called or not.
  *
- * @typeParam The type of value to which the promise resolves
+ * @typeParam T The type of value to which the promise resolves
  */
 export interface Resolver<T> {
     /** The promise which can be resolved by calling `resolve` */

@@ -23,9 +23,9 @@ const internalRecursionDetection = Symbol("conversations.recursion");
 const internalState = Symbol("conversations.state");
 const internalCompletenessMarker = Symbol("conversations.completeness");
 
-interface InternalState<C extends Context> {
+interface InternalState<OC extends Context, C extends Context> {
     getMutableData(): ConversationData;
-    index: ConversationIndex<C>;
+    index: ConversationIndex<OC, C>;
     defaultPlugins: Middleware<C>[];
     exitHandler?(name: string): Promise<void>;
 }
@@ -73,6 +73,9 @@ export interface ApiBaseData {
  * In that case, you should use a context type for only those plugins that are
  * shared between all conversations, or avoid a list of default plugins
  * entirely.
+ *
+ * @typeParam OC Custom context type of the outside middleware
+ * @typeParam C Custom context type used inside conversations
  */
 export interface ConversationOptions<OC extends Context, C extends Context> {
     /**
@@ -123,12 +126,12 @@ export interface ConversationOptions<OC extends Context, C extends Context> {
 export interface ConversationData {
     [id: string]: ConversationState[];
 }
-type ConversationIndex<C extends Context> = Map<
+type ConversationIndex<OC extends Context, C extends Context> = Map<
     string,
-    ConversationIndexEntry<C>
+    ConversationIndexEntry<OC, C>
 >;
-interface ConversationIndexEntry<C extends Context> {
-    builder: ConversationBuilder<C>;
+interface ConversationIndexEntry<OC extends Context, C extends Context> {
+    builder: ConversationBuilder<OC, C>;
     plugins: Middleware<C>[];
     maxMillisecondsToWait: number | undefined;
     parallel: boolean;
@@ -457,7 +460,6 @@ to use `await`?",
  * use it.
  *
  * @param options Optional options for the conversations plugin
- *
  * @typeParam OC Custom context type of the outside middleware
  * @typeParam C Custom context type used inside conversations
  */
@@ -484,7 +486,7 @@ export function conversations<OC extends Context, C extends Context>(
             return state; // will be mutated by conversations
         }
 
-        const index: ConversationIndex<C> = new Map();
+        const index: ConversationIndex<OC, C> = new Map();
         async function enter(id: string, ...args: unknown[]) {
             const entry = index.get(id);
             if (entry === undefined) {
@@ -522,7 +524,7 @@ export function conversations<OC extends Context, C extends Context>(
             return !(internalCompletenessMarker in ctx);
         }
 
-        const internal: InternalState<C> = {
+        const internal: InternalState<OC, C> = {
             getMutableData: getData,
             index,
             defaultPlugins: options.plugins ?? [],
@@ -655,10 +657,13 @@ export interface ConversationSkipped {
  * Any additional arguments are the values provided to the enter call. Note that
  * there is no type safety for these parameters.
  *
- * @typeParam C The type of context object used inside this conversation
+ * @param conversation A conversation handle
+ * @param ctx The initial context object
+ * @typeParam OC Custom context type of the outside middleware
+ * @typeParam C Custom context type used inside conversations
  */
-export type ConversationBuilder<C extends Context> = (
-    conversation: Conversation<C>,
+export type ConversationBuilder<OC extends Context, C extends Context> = (
+    conversation: Conversation<OC, C>,
     ctx: C,
     // deno-lint-ignore no-explicit-any
     ...args: any[]
@@ -816,12 +821,11 @@ export interface ConversationConfig<C extends Context> {
  *
  * @param builder A conversation builder function
  * @param options A different name for the conversation, or an options object
- *
  * @typeParam OC Custom context type of the outside middleware
  * @typeParam C Custom context type used inside this conversation
  */
 export function createConversation<OC extends Context, C extends Context>(
-    builder: ConversationBuilder<C>,
+    builder: ConversationBuilder<OC, C>,
     options?: string | ConversationConfig<C>,
 ): MiddlewareFn<ConversationFlavor<OC>> {
     const {
@@ -841,7 +845,7 @@ export function createConversation<OC extends Context, C extends Context>(
         }
 
         const { index, defaultPlugins, getMutableData, exitHandler } =
-            ctx[internalState] as InternalState<C>;
+            ctx[internalState] as InternalState<OC, C>;
         if (index.has(id)) {
             throw new Error(`Duplicate conversation identifier '${id}'!`);
         }
@@ -862,7 +866,7 @@ export function createConversation<OC extends Context, C extends Context>(
             api: ctx.api,
             me: ctx.me,
         };
-        const options: ResumeOptions<C> = {
+        const options: ResumeOptions<OC, C> = {
             ctx,
             plugins: combinedPlugins,
             onHalt,
@@ -901,13 +905,18 @@ export function createConversation<OC extends Context, C extends Context>(
  * @param id The identifier of the conversation
  * @param data The state of execution of all parallel conversations
  * @param options Additional configuration options
+ * @typeParam OC Custom context type of the outside middleware
+ * @typeParam C Custom context type used inside this conversation
  */
-export async function runParallelConversations<C extends Context>(
-    builder: ConversationBuilder<C>,
+export async function runParallelConversations<
+    OC extends Context,
+    C extends Context,
+>(
+    builder: ConversationBuilder<OC, C>,
     base: ContextBaseData,
     id: string,
     data: ConversationData,
-    options?: ResumeOptions<C>,
+    options?: ResumeOptions<OC, C>,
 ): Promise<ConversationResult> {
     if (!(id in data)) return { status: "skipped", next: true };
     const states = data[id];
@@ -994,7 +1003,8 @@ export interface EnterSkipped extends ConversationSkipped {
 }
 
 /** Options to pass when manually running a conversation from scratch */
-export interface EnterOptions<C extends Context> extends ResumeOptions<C> {
+export interface EnterOptions<OC extends Context, C extends Context>
+    extends ResumeOptions<OC, C> {
     /** A list of arguments to pass to the conversation */
     args?: unknown[];
 }
@@ -1008,11 +1018,13 @@ export interface EnterOptions<C extends Context> extends ResumeOptions<C> {
  * @param conversation A conversation builder function
  * @param base Context base data containing the incoming update
  * @param options Additional configuration options
+ * @typeParam OC Custom context type of the outside middleware
+ * @typeParam C Custom context type used inside this conversation
  */
-export async function enterConversation<C extends Context>(
-    conversation: ConversationBuilder<C>,
+export async function enterConversation<OC extends Context, C extends Context>(
+    conversation: ConversationBuilder<OC, C>,
     base: ContextBaseData,
-    options?: EnterOptions<C>,
+    options?: EnterOptions<OC, C>,
 ): Promise<EnterResult> {
     const { args = [], ...opts } = options ?? {};
     const packedArgs = args.length === 0 ? undefined : JSON.stringify(args);
@@ -1040,9 +1052,9 @@ export async function enterConversation<C extends Context>(
 }
 
 /** Options to pass when manually resuming a conversation */
-export interface ResumeOptions<C extends Context> {
+export interface ResumeOptions<OC extends Context, C extends Context> {
     /** A context object from the outside middleware to use in `external` */
-    ctx?: Context;
+    ctx?: OC;
     /** An array of plugins to run for newly created context objects */
     plugins?: Middleware<C>[];
     /** A callback function to run if `conversation.halt` is called */
@@ -1062,18 +1074,21 @@ export interface ResumeOptions<C extends Context> {
  *
  * @param conversation A conversation builder function
  * @param base Context base data containing the incoming update
+ * @param state Previous state of the conversation
  * @param options Additional configuration options
+ * @typeParam OC Custom context type of the outside middleware
+ * @typeParam C Custom context type used inside this conversation
  */
-export async function resumeConversation<C extends Context>(
-    conversation: ConversationBuilder<C>,
+export async function resumeConversation<OC extends Context, C extends Context>(
+    conversation: ConversationBuilder<OC, C>,
     base: ContextBaseData,
     state: ConversationState,
-    options?: ResumeOptions<C>,
+    options?: ResumeOptions<OC, C>,
 ): Promise<ConversationResult> {
     const { update, api, me } = base;
     const args = state.args === undefined ? [] : JSON.parse(state.args);
     const {
-        ctx = youTouchYouDie<C>(
+        ctx = youTouchYouDie<OC>(
             "The conversation was advanced from an event so there is no access to an outside context object",
         ),
         plugins = [],
@@ -1083,7 +1098,7 @@ export async function resumeConversation<C extends Context>(
     } = options ?? {};
     const middleware = new Composer(...plugins).middleware();
     // deno-lint-ignore no-explicit-any
-    const escape = (fn: (ctx: Context) => any) => fn(ctx);
+    const escape = (fn: (ctx: OC) => any) => fn(ctx);
     const engine = new ReplayEngine(async (controls) => {
         const hydrate = hydrateContext<C>(controls, api, me);
         const convo = new Conversation(controls, hydrate, escape, middleware, {

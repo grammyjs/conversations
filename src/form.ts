@@ -27,8 +27,9 @@ import type {
  * receives the extracted value as a second argument.
  *
  * @param ctx The current context object
+ * @param result The value returned by the form field
  * @typeParam C A custom context type
- * @typeParam T A value extracted by the validation function
+ * @typeParam T The type of form field
  */
 export type FormAction<C extends Context, T> = (
     ctx: C,
@@ -61,21 +62,14 @@ export type Otherwise<C extends Context> = (
  * {@link Otherwise} instead.
  *
  * @param ctx The current context object
+ * @param reason A reason why validation failed
  * @typeParam C A custom context type
- * @typeParam C A custom context type
- * @typeParam T A value extracted by the validation function
+ * @typeParam R A type of reason defined by the validation function
  */
 export type OtherwiseWithReason<C extends Context, R> = (
     ctx: C,
     reason: R,
 ) => unknown | Promise<unknown>;
-/**
- * A base options bag object for a form field. This holds all properties that
- * are common among {@link FormConfig} and {@link FormConfigWithReason}.
- *
- * @typeParam C A custom context type
- * @typeParam T A form field type
- */
 /**
  * Options to pass to a form field. Can be either a {@link FormAction} function
  * or a {@link FormConfig} object.
@@ -104,6 +98,13 @@ export type FormOptions<C extends Context, T> =
 export type FormOptionsWithReason<C extends Context, T, R> =
     | FormAction<C, T>
     | FormConfigWithReason<C, T, R>;
+/**
+ * A base options bag object for a form field. This holds all properties that
+ * are common among {@link FormConfig} and {@link FormConfigWithReason}.
+ *
+ * @typeParam C A custom context type
+ * @typeParam T A form field type
+ */
 export interface FormConfigShared<C extends Context, T> {
     /**
      * Determines whether [the outside middleware
