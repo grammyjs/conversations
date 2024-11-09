@@ -22,12 +22,12 @@ export interface ReplayState {
     receive: ReceiveOp[];
 }
 /** A send operation */
-interface SendOp {
+export interface SendOp {
     /** Any string payload for the send operation */
     payload: string;
 }
 /** A receive operation */
-interface ReceiveOp {
+export interface ReceiveOp {
     /** The identifier (index in a send log) of a send op */
     send: number;
     /** The received value */
