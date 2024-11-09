@@ -102,8 +102,9 @@ export interface ConversationOptions<OC extends Context, C extends Context> {
      * Called when a conversation is entered via `ctx.conversation.enter`.
      *
      * @param id The identifer of the conversation that was entered
+     * @param ctx The current context object
      */
-    onEnter?(id: string): unknown | Promise<unknown>;
+    onEnter?(id: string, ctx: OC): unknown | Promise<unknown>;
     /**
      * Called when a conversation is left via `ctx.conversation.exit` or
      * `conversation.halt`.
@@ -113,8 +114,9 @@ export interface ConversationOptions<OC extends Context, C extends Context> {
      * end of a conversation, you can simply call the callback directly.
      *
      * @param id The identifer of the conversation that was entered
+     * @param ctx The current context object
      */
-    onExit?(id: string): unknown | Promise<unknown>;
+    onExit?(id: string, ctx: OC): unknown | Promise<unknown>;
 }
 /**
  * Internal conversation data representation. Holds the state of any number of
@@ -496,7 +498,7 @@ export function conversations<OC extends Context, C extends Context>(
                 );
             }
             const { builder, plugins, maxMillisecondsToWait } = entry;
-            await options.onEnter?.(id);
+            await options.onEnter?.(id, ctx);
             const base: ContextBaseData = {
                 update: ctx.update,
                 api: ctx.api,
@@ -511,7 +513,7 @@ export function conversations<OC extends Context, C extends Context>(
         }
         const exit = options.onExit !== undefined
             ? async (name: string) => {
-                await options.onExit?.(name);
+                await options.onExit?.(name, ctx);
             }
             : undefined;
         function isParallel(name: string) {
