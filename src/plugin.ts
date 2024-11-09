@@ -664,7 +664,7 @@ export type ConversationBuilder<C extends Context> = (
     ctx: C,
     // deno-lint-ignore no-explicit-any
     ...args: any[]
-) => void | Promise<void>;
+) => Promise<unknown> | unknown;
 /**
  * Configuration options for a conversation. These options can be passed to
  * {@link createConversation} when installing the conversation.
