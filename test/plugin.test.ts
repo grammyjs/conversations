@@ -1412,7 +1412,7 @@ describe("enterConversation and resumeConversation", () => {
     it("should work", async () => {
         const expected = mkctx();
         let i = 0;
-        const convo: ConversationBuilder<Context> = async (
+        const convo: ConversationBuilder<Context, Context> = async (
             conversation,
             _ctx,
             param: string,
