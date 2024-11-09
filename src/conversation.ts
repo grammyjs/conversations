@@ -81,7 +81,7 @@ export interface ExternalOp<OC extends Context, R, I = any> {
     afterLoadError?(value: unknown): unknown | Promise<unknown>;
 }
 /** A function that applies a context object to a callback */
-type ApplyContext = <F extends (ctx: Context) => unknown>(
+type ApplyContext<OC extends Context> = <F extends (ctx: OC) => unknown>(
     fn: F,
 ) => Promise<ReturnType<F>>;
 
@@ -196,7 +196,7 @@ export interface HaltOptions {
  * Be sure to consult this plugin's documentation:
  * https://grammy.dev/plugins/conversations
  */
-export class Conversation<C extends Context = Context> {
+export class Conversation<OC extends Context, C extends Context> {
     /** `true` if `external` is currently running, `false` otherwise */
     private insideExternal = false;
 
@@ -220,7 +220,7 @@ export class Conversation<C extends Context = Context> {
     constructor(
         private controls: ReplayControls,
         private hydrate: (update: Update) => C,
-        private escape: ApplyContext,
+        private escape: ApplyContext<OC>,
         private plugins: MiddlewareFn<C>,
         private options: ConversationHandleOptions,
     ) {}
@@ -286,264 +286,6 @@ First return your data from `external` and then resume update handling using `wa
         };
         return this.combineAnd(makeWait());
     }
-    /**
-     * Skips the current update. The current update is the update that was
-     * received in the last wait call.
-     *
-     * In a sense, this will undo receiving an update. The replay logs will be
-     * reset so it will look like the conversation had never received the update
-     * in the first place. Note, however, that any API calls performs between
-     * wait and skip are not going to be reversed. In particular, messages will
-     * not be unsent.
-     *
-     * By default, skipping an update drops it. This means that no other
-     * handlers (including downstream middleware) will run. However, if this
-     * conversation is marked as parallel, skip will behave differently and
-     * resume middleware execution by default. This is needed for other parallel
-     * conversations with the same or a different identifier to receive the
-     * update.
-     *
-     * This behavior can be overridden by passing `{ next: true }` or `{ next:
-     * false }` to skip.
-     *
-     * If several wait calls are used concurrently inside the same conversation,
-     * they will resolve one after another until one of them does not skip the
-     * update. The conversation will only skip an update when all concurrent
-     * wait calls skip the update. Specifying `next` for a skip call that is not
-     * the final skip call has no effect.
-     *
-     * @param options Optional options to control middleware resumption
-     */
-    async skip(options: SkipOptions = {}): Promise<never> {
-        const next = "next" in options ? options.next : this.options.parallel;
-        return await this.controls.cancel(next ? "skip" : "drop");
-    }
-    /**
-     * Calls any exit handlers if installed, and then terminates the
-     * conversation immediately. This method never returns.
-     *
-     * By default, this will consume the update. Pass `{ next: true }` to make
-     * sure that downstream middleware is called.
-     *
-     * @param options Optional options to control middleware resumption
-     */
-    async halt(options: HaltOptions = {}): Promise<never> {
-        await this.options.onHalt?.();
-        return await this.controls.cancel(options.next ? "kill" : "halt");
-    }
-    /**
-     * Creates a new checkpoint at the current point of the conversation.
-     *
-     * This checkpoint can be passed to `rewind` in order to go back in the
-     * conversation and resume it from an earlier point.
-     *
-     * ```ts
-     * const check = conversation.checkpoint();
-     *
-     * // Later:
-     * await conversation.rewind(check);
-     * ```
-     */
-    checkpoint(): Checkpoint {
-        return this.controls.checkpoint();
-    }
-    /**
-     * Rewinds the conversation to a previous point and continues execution from
-     * there. This point is specified by a checkpoint that can be created by
-     * calling {@link Conversation.checkpoint}.
-     *
-     * ```ts
-     * const check = conversation.checkpoint();
-     *
-     * // Later:
-     * await conversation.rewind(check);
-     * ```
-     *
-     * @param checkpoint A previously created checkpoint
-     */
-    async rewind(checkpoint: Checkpoint): Promise<never> {
-        return await this.controls.cancel(checkpoint);
-    }
-    /**
-     * Runs a function outside of the replay engine. This provides a safe way to
-     * perform side-effects such as database communication, disk operations,
-     * session access, file downloads, requests to external APIs, randomness,
-     * time-based functions, and more. **It requires any data obtained from the
-     * outside to be serializable.**
-     *
-     * Remember that a conversation function is not executed like a normal
-     * JavaScript function. Instead, it is often interrupted and replayed,
-     * sometimes many times for the same update. If this is not obvious to you,
-     * it means that you probably should read [the documentation of this
-     * plugin](https://grammy.dev/plugins/conversations) in order to avoid
-     * common pitfalls.
-     *
-     * For instance, if you want to access to your database, you only want to
-     * read or write data once, rather than doing it once per replay. `external`
-     * provides an escape hatch to this situation. You can wrap your database
-     * call inside `external` to mark it as something that performs
-     * side-effects. The replay engine inside the conversations plugin will then
-     * make sure to only execute this operation once. This looks as follows.
-     *
-     * ```ts
-     * // Read from database
-     * const data = await conversation.external(async () => {
-     *   return await readFromDatabase()
-     * })
-     *
-     * // Write to database
-     * await conversation.external(async () => {
-     *   await writeToDatabase(data)
-     * })
-     * ```
-     *
-     * When `external` is called, it returns whichever data the given callback
-     * function returns. Note that this data has to be persisted by the plugin,
-     * so you have to make sure that it can be serialized. The data will be
-     * stored in the storage backend you provided when installing the
-     * conversations plugin via `bot.use`. In particular, it does not work well
-     * to return objects created by an ORM, as these objects have functions
-     * installed on them which will be lost during serialization.
-     *
-     * As a rule of thumb, imagine that all data from `external` is passed
-     * through `JSON.parse(JSON.stringify(data))` (even though this is not what
-     * actually happens under the hood).
-     *
-     * The callback function passed to `external` received the outside context
-     * object from the current middleware pass. This lets you access properties
-     * on the context object that are only present in the outside middleware
-     * system, but that have not been installed on the context objects inside a
-     * conversation. For example, you can access your session data this way.
-     *
-     * ```ts
-     * // Read from session
-     * const data = await conversation.external((ctx: MyContext) => {
-     *   return ctx.session.data
-     * })
-     *
-     * // Write to session
-     * await conversation.external((ctx: MyContext) => {
-     *   ctx.session.data = data
-     * })
-     * ```
-     *
-     * Be careful: you must annotate `ctx` manually. **This is an unsafe
-     * annotation and relies on a type cast internally!** The conversations
-     * plugin is not able to infer the type of the outside context object
-     * anymore. Messing this up can lead to runtime errors.
-     *
-     * Note that while a call to `external` is running, you cannot do any of the
-     * following things.
-     *
-     * - start a concurrent call to `external` from the same conversation
-     * - start a nested call to `external` from the same conversation
-     * - start a Bot API call from the same conversation
-     *
-     * Naturally, it is possible to have several concurrent calls to `externals`
-     * if they happen in unrelated chats. This still means that you should keep
-     * the code inside `external` to a minimum and actually only perform the
-     * desired side-effect itself.
-     *
-     * If you want to return data from `external` that cannot be serialized, you
-     * can specify a custom serialization function. This allows you choose a
-     * different intermediate data representation during storage than what is
-     * present at runtime.
-     *
-     * ```ts
-     * // Read bigint from an API but persist it as a string
-     * const largeNumber: bigint = await conversation.external({
-     *   task: () => fetchCoolBigIntFromTheInternet(),
-     *   beforeStore: (largeNumber) => String(largeNumber),
-     *   afterLoad: (str) => BigInt(str),
-     * })
-     * ```
-     *
-     * Note now we read a bigint from the database, but we convert it to string
-     * during persistence. This now allows us to use a storage adapter that only
-     * handles strings but does not need to support the bigint type.
-     *
-     * @param op An operation to perform outside of the conversation
-     */
-    // deno-lint-ignore no-explicit-any
-    async external<OC extends Context, R, I = any>(
-        op: ExternalOp<OC, R, I>["task"] | ExternalOp<OC, R, I>,
-    ): Promise<R> {
-        // Make sure that no other ops are performed concurrently (or from
-        // within the handler) because they will not be performed during a
-        // replay so they will be missing from the logs then, which clogs up the
-        // replay. This detection must be done here because this is the only
-        // place where misuse can be detected properly. The replay engine cannot
-        // discover that on its own because otherwise it would not support
-        // concurrent ops at all, which is undesired.
-        if (this.insideExternal) {
-            throw new Error(
-                "Cannot perform nested or concurrent calls to `external`!",
-            );
-        }
-
-        const {
-            task,
-            afterLoad = (x: I) => x as unknown as R,
-            afterLoadError = (e: unknown) => e,
-            beforeStore = (x: R) => x as unknown as I,
-            beforeStoreError = (e: unknown) => e,
-        } = typeof op === "function" ? { task: op } : op;
-        // Prepare values before storing them
-        const action = async () => {
-            this.insideExternal = true;
-            try {
-                // We perform an unsafe cast to the context type used in the
-                // surrounding middleware system. Technically, we could drag
-                // this type along from outside by adding an extra type
-                // parameter everywhere, but this makes all types too cumbersome
-                // to work with for bot developers. The benefits of this
-                // massively reduced complexity outweight the potential benefits
-                // of slightly stricter types for `external`.
-                const ret = await this.escape((ctx) => task(ctx as OC));
-                return { ok: true, ret: await beforeStore(ret) } as const;
-            } catch (e) {
-                return { ok: false, err: await beforeStoreError(e) } as const;
-            } finally {
-                this.insideExternal = false;
-            }
-        };
-        // Recover values after loading them
-        const ret = await this.controls.action(action, "external");
-        if (ret.ok) {
-            return await afterLoad(ret.ret);
-        } else {
-            throw await afterLoadError(ret.err);
-        }
-    }
-    /**
-     * Takes `Date.now()` once when reached, and returns the same value during
-     * every replay. Prefer this over calling `Date.now()` directly.
-     */
-    async now() {
-        return await this.external(() => Date.now());
-    }
-    /**
-     * Takes `Math.random()` once when reached, and returns the same value
-     * during every replay. Prefer this over calling `Math.random()` directly.
-     */
-    async random() {
-        return await this.external(() => Math.random());
-    }
-    /**
-     * Calls `console.log` only the first time it is reached, but not during
-     * subsequent replays. Prefer this over calling `console.log` directly.
-     */
-    async log(...data: unknown[]) {
-        await this.external(() => console.log(...data));
-    }
-    /**
-     * Calls `console.error` only the first time it is reached, but not during
-     * subsequent replays. Prefer this over calling `console.error` directly.
-     */
-    async error(...data: unknown[]) {
-        await this.external(() => console.error(...data));
-    }
-
     /**
      * Performs a filtered wait call that is defined by a given predicate. In
      * other words, this method waits for an update, and calls `skip` if the
@@ -949,6 +691,259 @@ First return your data from `external` and then resume update handling using `wa
                 ctx.channelPost?.reply_to_message?.message_id === id,
             { collationKey: `reply-${id}`, ...opts },
         ));
+    }
+
+    /**
+     * Skips the current update. The current update is the update that was
+     * received in the last wait call.
+     *
+     * In a sense, this will undo receiving an update. The replay logs will be
+     * reset so it will look like the conversation had never received the update
+     * in the first place. Note, however, that any API calls performs between
+     * wait and skip are not going to be reversed. In particular, messages will
+     * not be unsent.
+     *
+     * By default, skipping an update drops it. This means that no other
+     * handlers (including downstream middleware) will run. However, if this
+     * conversation is marked as parallel, skip will behave differently and
+     * resume middleware execution by default. This is needed for other parallel
+     * conversations with the same or a different identifier to receive the
+     * update.
+     *
+     * This behavior can be overridden by passing `{ next: true }` or `{ next:
+     * false }` to skip.
+     *
+     * If several wait calls are used concurrently inside the same conversation,
+     * they will resolve one after another until one of them does not skip the
+     * update. The conversation will only skip an update when all concurrent
+     * wait calls skip the update. Specifying `next` for a skip call that is not
+     * the final skip call has no effect.
+     *
+     * @param options Optional options to control middleware resumption
+     */
+    async skip(options: SkipOptions = {}): Promise<never> {
+        const next = "next" in options ? options.next : this.options.parallel;
+        return await this.controls.cancel(next ? "skip" : "drop");
+    }
+    /**
+     * Calls any exit handlers if installed, and then terminates the
+     * conversation immediately. This method never returns.
+     *
+     * By default, this will consume the update. Pass `{ next: true }` to make
+     * sure that downstream middleware is called.
+     *
+     * @param options Optional options to control middleware resumption
+     */
+    async halt(options: HaltOptions = {}): Promise<never> {
+        await this.options.onHalt?.();
+        return await this.controls.cancel(options.next ? "kill" : "halt");
+    }
+    /**
+     * Creates a new checkpoint at the current point of the conversation.
+     *
+     * This checkpoint can be passed to `rewind` in order to go back in the
+     * conversation and resume it from an earlier point.
+     *
+     * ```ts
+     * const check = conversation.checkpoint();
+     *
+     * // Later:
+     * await conversation.rewind(check);
+     * ```
+     */
+    checkpoint(): Checkpoint {
+        return this.controls.checkpoint();
+    }
+    /**
+     * Rewinds the conversation to a previous point and continues execution from
+     * there. This point is specified by a checkpoint that can be created by
+     * calling {@link Conversation.checkpoint}.
+     *
+     * ```ts
+     * const check = conversation.checkpoint();
+     *
+     * // Later:
+     * await conversation.rewind(check);
+     * ```
+     *
+     * @param checkpoint A previously created checkpoint
+     */
+    async rewind(checkpoint: Checkpoint): Promise<never> {
+        return await this.controls.cancel(checkpoint);
+    }
+    /**
+     * Runs a function outside of the replay engine. This provides a safe way to
+     * perform side-effects such as database communication, disk operations,
+     * session access, file downloads, requests to external APIs, randomness,
+     * time-based functions, and more. **It requires any data obtained from the
+     * outside to be serializable.**
+     *
+     * Remember that a conversation function is not executed like a normal
+     * JavaScript function. Instead, it is often interrupted and replayed,
+     * sometimes many times for the same update. If this is not obvious to you,
+     * it means that you probably should read [the documentation of this
+     * plugin](https://grammy.dev/plugins/conversations) in order to avoid
+     * common pitfalls.
+     *
+     * For instance, if you want to access to your database, you only want to
+     * read or write data once, rather than doing it once per replay. `external`
+     * provides an escape hatch to this situation. You can wrap your database
+     * call inside `external` to mark it as something that performs
+     * side-effects. The replay engine inside the conversations plugin will then
+     * make sure to only execute this operation once. This looks as follows.
+     *
+     * ```ts
+     * // Read from database
+     * const data = await conversation.external(async () => {
+     *   return await readFromDatabase()
+     * })
+     *
+     * // Write to database
+     * await conversation.external(async () => {
+     *   await writeToDatabase(data)
+     * })
+     * ```
+     *
+     * When `external` is called, it returns whichever data the given callback
+     * function returns. Note that this data has to be persisted by the plugin,
+     * so you have to make sure that it can be serialized. The data will be
+     * stored in the storage backend you provided when installing the
+     * conversations plugin via `bot.use`. In particular, it does not work well
+     * to return objects created by an ORM, as these objects have functions
+     * installed on them which will be lost during serialization.
+     *
+     * As a rule of thumb, imagine that all data from `external` is passed
+     * through `JSON.parse(JSON.stringify(data))` (even though this is not what
+     * actually happens under the hood).
+     *
+     * The callback function passed to `external` received the outside context
+     * object from the current middleware pass. This lets you access properties
+     * on the context object that are only present in the outside middleware
+     * system, but that have not been installed on the context objects inside a
+     * conversation. For example, you can access your session data this way.
+     *
+     * ```ts
+     * // Read from session
+     * const data = await conversation.external((ctx) => {
+     *   return ctx.session.data
+     * })
+     *
+     * // Write to session
+     * await conversation.external((ctx) => {
+     *   ctx.session.data = data
+     * })
+     * ```
+     *
+     * Note that while a call to `external` is running, you cannot do any of the
+     * following things.
+     *
+     * - start a concurrent call to `external` from the same conversation
+     * - start a nested call to `external` from the same conversation
+     * - start a Bot API call from the same conversation
+     *
+     * Naturally, it is possible to have several concurrent calls to `externals`
+     * if they happen in unrelated chats. This still means that you should keep
+     * the code inside `external` to a minimum and actually only perform the
+     * desired side-effect itself.
+     *
+     * If you want to return data from `external` that cannot be serialized, you
+     * can specify a custom serialization function. This allows you choose a
+     * different intermediate data representation during storage than what is
+     * present at runtime.
+     *
+     * ```ts
+     * // Read bigint from an API but persist it as a string
+     * const largeNumber: bigint = await conversation.external({
+     *   task: () => fetchCoolBigIntFromTheInternet(),
+     *   beforeStore: (largeNumber) => String(largeNumber),
+     *   afterLoad: (str) => BigInt(str),
+     * })
+     * ```
+     *
+     * Note how we read a bigint from the internet, but we convert it to string
+     * during persistence. This now allows us to use a storage adapter that only
+     * handles strings but does not need to support the bigint type.
+     *
+     * @param op An operation to perform outside of the conversation
+     */
+    // deno-lint-ignore no-explicit-any
+    async external<R, I = any>(
+        op: ExternalOp<OC, R, I>["task"] | ExternalOp<OC, R, I>,
+    ): Promise<R> {
+        // Make sure that no other ops are performed concurrently (or from
+        // within the handler) because they will not be performed during a
+        // replay so they will be missing from the logs then, which clogs up the
+        // replay. This detection must be done here because this is the only
+        // place where misuse can be detected properly. The replay engine cannot
+        // discover that on its own because otherwise it would not support
+        // concurrent ops at all, which is undesired.
+        if (this.insideExternal) {
+            throw new Error(
+                "Cannot perform nested or concurrent calls to `external`!",
+            );
+        }
+
+        const {
+            task,
+            afterLoad = (x: I) => x as unknown as R,
+            afterLoadError = (e: unknown) => e,
+            beforeStore = (x: R) => x as unknown as I,
+            beforeStoreError = (e: unknown) => e,
+        } = typeof op === "function" ? { task: op } : op;
+        // Prepare values before storing them
+        const action = async () => {
+            this.insideExternal = true;
+            try {
+                // We perform an unsafe cast to the context type used in the
+                // surrounding middleware system. Technically, we could drag
+                // this type along from outside by adding an extra type
+                // parameter everywhere, but this makes all types too cumbersome
+                // to work with for bot developers. The benefits of this
+                // massively reduced complexity outweight the potential benefits
+                // of slightly stricter types for `external`.
+                const ret = await this.escape((ctx) => task(ctx));
+                return { ok: true, ret: await beforeStore(ret) } as const;
+            } catch (e) {
+                return { ok: false, err: await beforeStoreError(e) } as const;
+            } finally {
+                this.insideExternal = false;
+            }
+        };
+        // Recover values after loading them
+        const ret = await this.controls.action(action, "external");
+        if (ret.ok) {
+            return await afterLoad(ret.ret);
+        } else {
+            throw await afterLoadError(ret.err);
+        }
+    }
+    /**
+     * Takes `Date.now()` once when reached, and returns the same value during
+     * every replay. Prefer this over calling `Date.now()` directly.
+     */
+    async now() {
+        return await this.external(() => Date.now());
+    }
+    /**
+     * Takes `Math.random()` once when reached, and returns the same value
+     * during every replay. Prefer this over calling `Math.random()` directly.
+     */
+    async random() {
+        return await this.external(() => Math.random());
+    }
+    /**
+     * Calls `console.log` only the first time it is reached, but not during
+     * subsequent replays. Prefer this over calling `console.log` directly.
+     */
+    async log(...data: unknown[]) {
+        await this.external(() => console.log(...data));
+    }
+    /**
+     * Calls `console.error` only the first time it is reached, but not during
+     * subsequent replays. Prefer this over calling `console.error` directly.
+     */
+    async error(...data: unknown[]) {
+        await this.external(() => console.error(...data));
     }
 
     /**

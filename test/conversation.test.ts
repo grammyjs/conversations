@@ -24,7 +24,7 @@ import {
     stub,
 } from "./deps.test.ts";
 
-type Convo = Conversation<Context>;
+type Convo = Conversation<Context, Context>;
 function mkctx(update: unknown = {}) {
     return new Context(update as Update, new Api("dummy"), {} as UserFromGetMe);
 }
@@ -750,7 +750,7 @@ describe("Conversation", () => {
     it("should support now", async () => {
         let i = 0;
         let old: number | undefined;
-        async function convo(conversation: Conversation) {
+        async function convo(conversation: Convo) {
             const cnow = await conversation.now();
             await conversation.external(() => old = cnow);
             await conversation.wait();
@@ -768,7 +768,7 @@ describe("Conversation", () => {
     it("should support random", async () => {
         let i = 0;
         let old: number | undefined;
-        async function convo(conversation: Conversation) {
+        async function convo(conversation: Convo) {
             const cnow = await conversation.random();
             await conversation.external(() => old = cnow);
             await conversation.wait();
@@ -786,7 +786,7 @@ describe("Conversation", () => {
     it("should support log", async () => {
         const log = spy((..._: unknown[]) => {});
         using _ = stub(console, "log", log);
-        async function convo(conversation: Conversation) {
+        async function convo(conversation: Convo) {
             await conversation.log("foo", 42);
             await conversation.wait();
         }
@@ -802,7 +802,7 @@ describe("Conversation", () => {
     it("should support error", async () => {
         const err = spy((..._: unknown[]) => {});
         using _ = stub(console, "error", err);
-        async function convo(conversation: Conversation) {
+        async function convo(conversation: Convo) {
             await conversation.error("foo", 42);
             await conversation.wait();
         }

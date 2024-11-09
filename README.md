@@ -28,7 +28,7 @@ import {
 type MyContext = ConversationFlavor<Context>;
 type MyConversationContext = Context;
 
-type MyConversation = Conversation<MyConversationContext>;
+type MyConversation = Conversation<MyContext, MyConversationContext>;
 
 const bot = new Bot<MyContext>("");
 
