@@ -78,6 +78,9 @@ export function pinVersion(version: string | number): PinnedVersion {
     }
     function unpack<S>(data?: VersionedState<S>): S | undefined {
         if (data === undefined) return undefined;
+        if (!Array.isArray(data.version)) {
+            throw new Error("Unknown data format, cannot parse version");
+        }
         const [pluginVersion, dataVersion] = data.version;
         if (dataVersion !== version) return undefined;
         if (pluginVersion !== PLUGIN_DATA_VERSION) {
