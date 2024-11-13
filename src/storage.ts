@@ -77,7 +77,7 @@ export function pinVersion(version: string | number): PinnedVersion {
         return { version: [PLUGIN_DATA_VERSION, version], state };
     }
     function unpack<S>(data?: VersionedState<S>): S | undefined {
-        if (data === undefined) return undefined;
+        if (data === undefined || !Array.isArray(data.version)) return undefined;
         const [pluginVersion, dataVersion] = data.version;
         if (dataVersion !== version) return undefined;
         if (pluginVersion !== PLUGIN_DATA_VERSION) {
