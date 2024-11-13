@@ -170,6 +170,8 @@ export interface ConversationKeyStorage<C extends Context, S> {
     type: "key";
     /** An optional version for the data, defaults to `0` */
     version?: string | number;
+    /** An optional prefix to prepend to the storage key */
+    prefix?: string;
     /** An optional storage key function, defaults to `ctx.chatId` */
     getStorageKey?(ctx: C): string | undefined;
     /** The underlying storage that defines how to read and write raw data */
@@ -183,7 +185,6 @@ function defaultStorage<C extends Context, S>(): ConversationKeyStorage<C, S> {
     const store = new Map<string, VersionedState<S>>();
     return {
         type: "key",
-        getStorageKey: defaultStorageKey,
         adapter: {
             read: (key) => store.get(key),
             write: (key, state) => void store.set(key, state),
@@ -218,9 +219,10 @@ export function uniformStorage<C extends Context, S>(
     const { versionify, unpack } = pinVersion(version);
 
     if (storage.type === "key") {
-        const { getStorageKey = defaultStorageKey, adapter } = storage;
+        const { getStorageKey = defaultStorageKey, prefix = "", adapter } =
+            storage;
         return (ctx: C) => {
-            const key = getStorageKey(ctx);
+            const key = prefix + getStorageKey(ctx);
             return key === undefined
                 ? {
                     read: () => undefined,
