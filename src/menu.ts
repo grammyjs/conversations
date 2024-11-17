@@ -220,10 +220,12 @@ export class ConversationMenuPool<C extends Context> {
             // Install a transformer that watches all outgoing payloads for menus
             async (prev, method, payload, signal) => {
                 const p: Record<string, unknown> = payload;
-                if (Array.isArray(p.results)) {
-                    await Promise.all(p.results.map((r) => prepare(r)));
-                } else {
-                    await prepare(p);
+                if (p !== undefined) {
+                    if (Array.isArray(p.results)) {
+                        await Promise.all(p.results.map((r) => prepare(r)));
+                    } else {
+                        await prepare(p);
+                    }
                 }
                 return await prev(method, payload, signal);
             },
