@@ -196,7 +196,10 @@ export interface HaltOptions {
  * Be sure to consult this plugin's documentation:
  * https://grammy.dev/plugins/conversations
  */
-export class Conversation<OC extends Context, C extends Context> {
+export class Conversation<
+    OC extends Context = Context,
+    C extends Context = Context,
+> {
     /** `true` if `external` is currently running, `false` otherwise */
     private insideExternal = false;
 
@@ -816,7 +819,7 @@ First return your data from `external` and then resume update handling using `wa
      * through `JSON.parse(JSON.stringify(data))` (even though this is not what
      * actually happens under the hood).
      *
-     * The callback function passed to `external` received the outside context
+     * The callback function passed to `external` receives the outside context
      * object from the current middleware pass. This lets you access properties
      * on the context object that are only present in the outside middleware
      * system, but that have not been installed on the context objects inside a
