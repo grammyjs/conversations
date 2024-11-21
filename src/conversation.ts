@@ -44,10 +44,6 @@ export interface ExternalOp<OC extends Context, R, I = any> {
      * gives the task access to sessions (if used) and other values that are not
      * present inside the conversation.
      *
-     * > Note that the type of the context object is only inferred to be
-     * > `Context`. If you use a custom context type, you have to annotate the
-     * > parameter correctly. This will perform an unsafe type cast internally.
-     *
      * @param ctx The outside context object of the surrounding middleware
      */
     task(ctx: OC): R | Promise<R>;
