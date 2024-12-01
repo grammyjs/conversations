@@ -356,8 +356,11 @@ to use `await`?",
                     throw result.error;
                 case "handled":
                 case "skipped": {
+                    const args = result.args === undefined
+                        ? {}
+                        : { args: result.args };
                     const state: ConversationState = {
-                        args: result.args,
+                        ...args,
                         interrupts: result.interrupts,
                         replay: result.replay,
                     };
@@ -1029,10 +1032,10 @@ export async function enterConversation<OC extends Context, C extends Context>(
     options?: EnterOptions<OC, C>,
 ): Promise<EnterResult> {
     const { args = [], ...opts } = options ?? {};
-    const packedArgs = args.length === 0 ? undefined : JSON.stringify(args);
     const [initialState, int] = ReplayEngine.open("wait");
+    const packedArgs = args.length === 0 ? {} : { args: JSON.stringify(args) };
     const state: ConversationState = {
-        args: packedArgs,
+        ...packedArgs,
         replay: initialState,
         interrupts: [int],
     };
@@ -1042,10 +1045,10 @@ export async function enterConversation<OC extends Context, C extends Context>(
         case "error":
             return result;
         case "handled":
-            return { args: packedArgs, ...result };
+            return { ...packedArgs, ...result };
         case "skipped":
             return {
-                args: packedArgs,
+                ...packedArgs,
                 replay: initialState,
                 interrupts: state.interrupts,
                 ...result,
