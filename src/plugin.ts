@@ -1088,7 +1088,9 @@ export async function resumeConversation<OC extends Context, C extends Context>(
     options?: ResumeOptions<OC, C>,
 ): Promise<ConversationResult> {
     const { update, api, me } = base;
-    const args = state.args === undefined ? [] : JSON.parse(state.args);
+    const args = (state.args === undefined || state.args === null)
+        ? []
+        : JSON.parse(state.args);
     const {
         ctx = youTouchYouDie<OC>(
             "The conversation was advanced from an event so there is no access to an outside context object",
