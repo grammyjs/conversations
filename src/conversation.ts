@@ -339,7 +339,7 @@ First return your data from `external` and then resume update handling using `wa
             });
             if (!await predicate(ctx)) {
                 await otherwise?.(ctx);
-                await this.skip({ next });
+                await this.skip(next === undefined ? {} : { next });
             }
             return ctx;
         };
