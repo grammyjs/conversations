@@ -16,17 +16,12 @@
         "prepare": "npm run backport",
         "backport": "deno2node tsconfig.json"
     },
-    "dependencies": {
-        "debug": "^4.3.4",
-        "o-son": "^1.0.1"
-    },
     "peerDependencies": {
         "grammy": "^1.20.1"
     },
     "devDependencies": {
-        "@types/debug": "^4.1.8",
         "@types/node": "^12.20.55",
-        "deno2node": "^1.8.1"
+        "deno2node": "^1.14.0"
     },
     "files": [
         "out/"
