@@ -4,17 +4,16 @@
 
 The grammY conversations plugin lets you create powerful conversational interfaces with ease.
 
-This is version 2 of the plugin.
-Version 2 is a complete rewrite from scratch.
-It is not released yet, but most of the coding is done, so it will likely be released in the coming days or weeks, right after the documentation was written.
+> This is version 2 of the plugin.
+> Version 2 is a complete rewrite from scratch.
+> If you are still using version 1.x, check out [the migration guide](https://grammy.dev/plugins/conversations#migrating-from-1-x-to-2-x).
+> (The old docs are no longer be updated but they can still be found [here](https://6797de6b803511577fcb38ad--grammy.netlify.app/plugins/conversations).)
 
-That being said, now is the perfect time to try out the rewrite!
-
-Here is a quickstart for you for v2, but if you want to use v1 instead, you should rather look at the actual docs page: <https://grammy.dev/plugins/conversations>
+You should check out [the official documentation](https://grammy.dev/plugins/conversations) of the plugin, but here is a quickstart for you to get up and running.
 
 ## Quickstart
 
-Run `npm i github:grammyjs/conversations` to install the code right from this repository and paste the following code:
+Run `npm i @grammyjs/conversations` and paste the following code:
 
 ```ts
 import { Bot, type Context } from "grammy";
