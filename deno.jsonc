@@ -2,7 +2,7 @@
     "lock": false,
     "tasks": {
         "check": "deno cache --allow-import --check=all src/mod.ts",
-        "build": "deno run --no-prompt --allow-read=. --allow-write=. https://deno.land/x/deno2node@v1.8.1/src/cli.ts tsconfig.json",
+        "build": "deno run --no-prompt --allow-import --allow-read=. --allow-write=. https://deno.land/x/deno2node@v1.14.0/src/cli.ts tsconfig.json",
         "test": "deno test --allow-import test",
         "ok": "deno fmt && deno lint && deno task test && deno task check",
         "clean": "git clean -fX out test/cov_profile test/coverage coverage.lcov",
