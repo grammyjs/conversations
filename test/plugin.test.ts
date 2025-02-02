@@ -859,6 +859,7 @@ describe("createConversation", () => {
 
             let i = 0;
             let p: Promise<unknown> | undefined;
+            const e = Promise.withResolvers<void>();
             mw.use(
                 conversations({
                     storage: {
@@ -868,14 +869,17 @@ describe("createConversation", () => {
                 }),
                 createConversation(async (c) => {
                     i++;
+                    e.resolve();
                     await c.wait();
                 }, "convo"),
                 (ctx) => {
+                    console.log("mw");
                     p = assertRejects(() => ctx.conversation.enter("convo"))
                         .then(() => i++);
                 },
             );
             await mw.middleware()(ctx, next);
+            await e.promise;
             assertEquals(i, 1);
             await p;
             assertEquals(i, 2);
