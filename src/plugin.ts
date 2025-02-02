@@ -103,7 +103,11 @@ export interface ConversationOptions<OC extends Context, C extends Context> {
      * each conversation will have the plugins installed that you specify
      * explicitly when using {@link enterConversation}.
      */
-    plugins?: Middleware<C>[];
+    plugins?:
+        | Middleware<C>[]
+        | ((
+            conversation: Conversation<OC, C>,
+        ) => Middleware<C>[] | Promise<Middleware<C>[]>);
     /**
      * Called when a conversation is entered via `ctx.conversation.enter`.
      *
