@@ -2,7 +2,6 @@ import { Conversation } from "./conversation.ts";
 import {
     Api,
     type ApiClientOptions,
-    Composer,
     Context,
     HttpError,
     type Middleware,
@@ -26,7 +25,11 @@ const internalCompletenessMarker = Symbol("conversations.completeness");
 interface InternalState<OC extends Context, C extends Context> {
     getMutableData(): ConversationData;
     index: ConversationIndex<OC, C>;
-    defaultPlugins: Middleware<C>[];
+    defaultPlugins:
+        | Middleware<C>[]
+        | ((
+            conversation: Conversation<OC, C>,
+        ) => Middleware<C>[] | Promise<Middleware<C>[]>);
     exitHandler?(name: string): Promise<void>;
 }
 
@@ -134,7 +137,7 @@ type ConversationIndex<OC extends Context, C extends Context> = Map<
 >;
 interface ConversationIndexEntry<OC extends Context, C extends Context> {
     builder: ConversationBuilder<OC, C>;
-    plugins: Middleware<C>[];
+    plugins: (conversation: Conversation<OC, C>) => Promise<Middleware<C>[]>;
     maxMillisecondsToWait: number | undefined;
     parallel: boolean;
 }
@@ -677,9 +680,10 @@ export type ConversationBuilder<OC extends Context, C extends Context> = (
  * Configuration options for a conversation. These options can be passed to
  * {@link createConversation} when installing the conversation.
  *
+ * @typeParam OC The type of context object of the outside middleware
  * @typeParam C The type of context object used inside this conversation
  */
-export interface ConversationConfig<C extends Context> {
+export interface ConversationConfig<OC extends Context, C extends Context> {
     /**
      * Identifier of the conversation. The identifier can be used to enter or
      * exit conversations from middleware.
@@ -738,7 +742,11 @@ export interface ConversationConfig<C extends Context> {
      * that you need to use the custom context type used inside the
      * conversation, not the custom context type used in the outside middleware.
      */
-    plugins?: Middleware<C>[];
+    plugins?:
+        | Middleware<C>[]
+        | ((
+            conversation: Conversation<OC, C>,
+        ) => Middleware<C>[] | Promise<Middleware<C>[]>);
     /**
      * Specifies a default timeout for all wait calls inside the conversation.
      *
@@ -831,7 +839,7 @@ export interface ConversationConfig<C extends Context> {
  */
 export function createConversation<OC extends Context, C extends Context>(
     builder: ConversationBuilder<OC, C>,
-    options?: string | ConversationConfig<C>,
+    options?: string | ConversationConfig<OC, C>,
 ): MiddlewareFn<ConversationFlavor<OC>> {
     const {
         id = builder.name,
@@ -854,7 +862,16 @@ export function createConversation<OC extends Context, C extends Context>(
         if (index.has(id)) {
             throw new Error(`Duplicate conversation identifier '${id}'!`);
         }
-        const combinedPlugins = [...defaultPlugins, ...plugins];
+        const defaultPluginsFunc = typeof defaultPlugins === "function"
+            ? defaultPlugins
+            : () => defaultPlugins;
+        const pluginsFunc = typeof plugins === "function"
+            ? plugins
+            : () => plugins;
+        const combinedPlugins = async (conversation: Conversation<OC, C>) => [
+            ...await defaultPluginsFunc(conversation),
+            ...await pluginsFunc(conversation),
+        ];
         index.set(id, {
             builder,
             plugins: combinedPlugins,
@@ -1061,7 +1078,11 @@ export interface ResumeOptions<OC extends Context, C extends Context> {
     /** A context object from the outside middleware to use in `external` */
     ctx?: OC;
     /** An array of plugins to run for newly created context objects */
-    plugins?: Middleware<C>[];
+    plugins?:
+        | Middleware<C>[]
+        | ((
+            conversation: Conversation<OC, C>,
+        ) => Middleware<C>[] | Promise<Middleware<C>[]>);
     /** A callback function to run if `conversation.halt` is called */
     onHalt?(): void | Promise<void>;
     /** A default wait timeout */
@@ -1101,12 +1122,11 @@ export async function resumeConversation<OC extends Context, C extends Context>(
         maxMillisecondsToWait,
         parallel,
     } = options ?? {};
-    const middleware = new Composer(...plugins).middleware();
     // deno-lint-ignore no-explicit-any
     const escape = (fn: (ctx: OC) => any) => fn(ctx);
     const engine = new ReplayEngine(async (controls) => {
         const hydrate = hydrateContext<C>(controls, api, me);
-        const convo = new Conversation(controls, hydrate, escape, middleware, {
+        const convo = new Conversation(controls, hydrate, escape, plugins, {
             onHalt,
             maxMillisecondsToWait,
             parallel,

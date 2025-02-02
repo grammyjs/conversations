@@ -1,12 +1,13 @@
 import {
     type CallbackQueryContext,
     type CommandContext,
+    Composer,
     Context,
     type Filter,
     type FilterQuery,
     type GameQueryContext,
     type HearsContext,
-    type MiddlewareFn,
+    type Middleware,
     type ReactionContext,
     type ReactionType,
     type ReactionTypeEmoji,
@@ -196,6 +197,10 @@ export class Conversation<
     OC extends Context = Context,
     C extends Context = Context,
 > {
+    private plugins: (
+        conversation: Conversation<OC, C>,
+    ) => Middleware<C>[] | Promise<Middleware<C>[]>;
+
     /** `true` if `external` is currently running, `false` otherwise */
     private insideExternal = false;
 
@@ -220,9 +225,15 @@ export class Conversation<
         private controls: ReplayControls,
         private hydrate: (update: Update) => C,
         private escape: ApplyContext<OC>,
-        private plugins: MiddlewareFn<C>,
+        plugins:
+            | Middleware<C>[]
+            | ((
+                conversation: Conversation<OC, C>,
+            ) => Middleware<C>[] | Promise<Middleware<C>[]>),
         private options: ConversationHandleOptions,
-    ) {}
+    ) {
+        this.plugins = Array.isArray(plugins) ? () => plugins : plugins;
+    }
     /**
      * Waits for a new update and returns the corresponding context object as
      * soon as it arrives.
@@ -267,7 +278,8 @@ First return your data from `external` and then resume update handling using `wa
 
             // run plugins
             let pluginsCalledNext = false;
-            await this.plugins(ctx, () => {
+            const middleware = await this.plugins(this);
+            await new Composer(...middleware).middleware()(ctx, () => {
                 pluginsCalledNext = true;
                 return Promise.resolve();
             });
