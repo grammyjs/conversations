@@ -4,6 +4,7 @@ import {
     assert,
     assertEquals,
     assertGreater,
+    assertRejects,
     assertSpyCall,
     assertSpyCalls,
     describe,
@@ -386,5 +387,34 @@ describe("ReplayEngine", () => {
         assertEquals(result.message, "y");
         assertSpyCalls(builder, 2);
         assertEquals(i, 0);
+    });
+    it("should throw error if the controls are used after the replay has finished", async () => {
+        let controls: ReplayControls | undefined;
+        const engine = new ReplayEngine((c) => {
+            controls = c;
+        });
+        const res = await engine.play();
+        assertEquals(res.type, "returned");
+        assertRejects(
+            async () => {
+                await controls?.action(() => 0, "");
+            },
+            Error,
+            "missing an `await`",
+        );
+        assertRejects(
+            async () => {
+                await controls?.cancel();
+            },
+            Error,
+            "missing an `await`",
+        );
+        assertRejects(
+            async () => {
+                await controls?.interrupt("");
+            },
+            Error,
+            "missing an `await`",
+        );
     });
 });

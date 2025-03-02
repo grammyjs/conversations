@@ -316,6 +316,11 @@ async function replayState(
         return res;
     }
     async function cancel(key?: unknown) {
+        if (complete) {
+            throw new Error(
+                "Cannot perform a cancel operation after the conversation has completed, are you missing an `await`?",
+            );
+        }
         canceled = true;
         interrupted = true;
         message = key;
