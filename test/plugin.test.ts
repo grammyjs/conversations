@@ -270,7 +270,7 @@ describe("createConversation", () => {
         assertEquals(i, 1);
         assertEquals(seq, "kiaeghfbcjlaeghfbcaeghfbdm");
     });
-    it.only("should support plugins that have access to the conversation handle", async () => {
+    it("should support plugins that have access to the conversation handle", async () => {
         const mw = new Composer<TestContext>();
         let i = 0;
         let seq = "";
