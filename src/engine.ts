@@ -276,7 +276,7 @@ async function replayState(
     function begin() {
         if (complete) {
             throw new Error(
-                "Cannot begin another operation after the conversation has completed, are you missing an `await`?",
+                "Cannot begin another operation after the replay has completed, are you missing an `await`?",
             );
         }
         promises++;
@@ -318,7 +318,7 @@ async function replayState(
     async function cancel(key?: unknown) {
         if (complete) {
             throw new Error(
-                "Cannot perform a cancel operation after the conversation has completed, are you missing an `await`?",
+                "Cannot perform a cancel operation after the replay has completed, are you missing an `await`?",
             );
         }
         canceled = true;
