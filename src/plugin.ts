@@ -112,7 +112,7 @@ export interface ConversationOptions<OC extends Context, C extends Context> {
      * Called when a conversation is left via `ctx.conversation.exit` or
      * `conversation.halt`.
      *
-     * Note that this callback is not called when a conversation exists normally
+     * Note that this callback is not called when a conversation exits normally
      * by returning or by throwing an error. If you wish to execute logic at the
      * end of a conversation, you can simply call the callback directly.
      *
