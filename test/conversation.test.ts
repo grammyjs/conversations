@@ -160,7 +160,7 @@ describe("Conversation", () => {
         assert(second.status === "complete");
         assertEquals(i, 1);
     });
-    it.only("should return immutable data from external", async () => {
+    it("should return immutable data from external", async () => {
         const ctx = mkctx();
         const observe = spy((_counter: number) => {});
         async function convo(conversation: Convo) {
