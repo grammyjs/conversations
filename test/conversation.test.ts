@@ -93,6 +93,43 @@ describe("Conversation", () => {
         assert(fifth.status === "complete");
         assertEquals(i, 2);
     });
+    it("should wait with Promise.all", async () => {
+        const ctx = mkctx();
+        let i = 0;
+        async function convo(conversation: Convo) {
+            await Promise.all([
+                conversation.wait(),
+                conversation.wait(),
+                conversation.wait(),
+                conversation.wait(),
+            ]);
+            i++;
+        }
+        const first = await enterConversation(convo, ctx);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        assertEquals(i, 0);
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, ctx, copy);
+        assertEquals(second.status, "handled");
+        assert(second.status === "handled");
+        assertEquals(i, 0);
+        const otherCopy = { ...structuredClone(second), args: first.args };
+        const third = await resumeConversation(convo, ctx, otherCopy);
+        assertEquals(third.status, "handled");
+        assert(third.status === "handled");
+        assertEquals(i, 0);
+        const thirdCopy = { ...structuredClone(third), args: first.args };
+        const fourth = await resumeConversation(convo, ctx, thirdCopy);
+        assertEquals(fourth.status, "handled");
+        assert(fourth.status === "handled");
+        assertEquals(i, 0);
+        const fourthCopy = { ...structuredClone(fourth), args: first.args };
+        const fifth = await resumeConversation(convo, ctx, fourthCopy);
+        assertEquals(fifth.status, "complete");
+        assert(fifth.status === "complete");
+        assertEquals(i, 1);
+    });
     it("should skip", async () => {
         let i = 0;
         let j = 0;
