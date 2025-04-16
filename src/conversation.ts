@@ -903,10 +903,12 @@ First return your data from `external` and then resume update handling using `wa
         };
         // Recover values after loading them
         const ret = await this.controls.action(action, "external");
-        if (ret.ok) {
-            return await afterLoad(ret.ret);
+        // Clone them to provide immutability
+        const cloned = structuredClone(ret);
+        if (cloned.ok) {
+            return await afterLoad(cloned.ret);
         } else {
-            throw await afterLoadError(ret.err);
+            throw await afterLoadError(cloned.err);
         }
     }
     /**
