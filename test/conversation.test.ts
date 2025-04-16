@@ -197,6 +197,29 @@ describe("Conversation", () => {
         assert(second.status === "complete");
         assertEquals(i, 1);
     });
+    it("should return immutable data from external", async () => {
+        const ctx = mkctx();
+        const observe = spy((_counter: number) => {});
+        async function convo(conversation: Convo) {
+            const pointer = await conversation.external(() => ({ counter: 0 }));
+            pointer.counter++;
+            const checkoint = conversation.checkpoint();
+            observe(pointer.counter);
+            await conversation.wait();
+            pointer.counter++;
+            await conversation.rewind(checkoint);
+        }
+        const first = await enterConversation(convo, ctx);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, ctx, first);
+        assertEquals(second.status, "handled");
+        assert(second.status === "handled");
+        assertSpyCalls(observe, 3);
+        assertSpyCall(observe, 0, { args: [1] });
+        assertSpyCall(observe, 1, { args: [1] });
+        assertSpyCall(observe, 2, { args: [1] });
+    });
     it("should support outside context objects in external", async () => {
         const ctx = mkctx({ update_id: Math.random() });
         let i = 0;
