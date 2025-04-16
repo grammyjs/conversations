@@ -893,13 +893,6 @@ First return your data from `external` and then resume update handling using `wa
         const action = async () => {
             this.insideExternal = true;
             try {
-                // We perform an unsafe cast to the context type used in the
-                // surrounding middleware system. Technically, we could drag
-                // this type along from outside by adding an extra type
-                // parameter everywhere, but this makes all types too cumbersome
-                // to work with for bot developers. The benefits of this
-                // massively reduced complexity outweight the potential benefits
-                // of slightly stricter types for `external`.
                 const ret = await this.escape((ctx) => task(ctx));
                 return { ok: true, ret: await beforeStore(ret) } as const;
             } catch (e) {
