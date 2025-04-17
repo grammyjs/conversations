@@ -219,6 +219,7 @@ describe("createConversation", () => {
     it("should support plugins", async () => {
         const mw = new Composer<TestContext>();
         let i = 0;
+        let seq = "";
 
         type PluginContext = TestContext & {
             phi: number;
@@ -227,31 +228,112 @@ describe("createConversation", () => {
         mw.use(
             conversations({
                 plugins: [async (ctx, next) => {
+                    seq += "a";
                     Object.assign(ctx, { phi: 0.5 * (1 + Math.sqrt(5)) });
                     await next();
+                    seq += "b";
                 }],
             }),
             createConversation(async (convo, ctx: PluginContext) => {
+                seq += "c";
                 assertEquals(ctx.prop, 42);
                 ctx = await convo.wait();
+                seq += "d";
                 assertEquals(ctx.prop, 42);
                 assertEquals(Math.round(ctx.phi), 2);
                 i++;
             }, {
                 id: "convo",
                 plugins: [async (ctx, next) => {
+                    seq += "e";
                     Object.assign(ctx, { prop: 0 });
                     await next();
+                    seq += "f";
                 }, async (ctx, next) => {
+                    seq += "g";
                     Object.assign(ctx, { prop: 42 });
                     await next();
+                    seq += "h";
                 }],
             }),
-            (ctx) => ctx.conversation.enter("convo"),
+            async (ctx) => {
+                seq += "i";
+                await ctx.conversation.enter("convo");
+                seq += "j";
+            },
         );
+        seq += "k";
         await mw.middleware()(mkctx(), next);
+        seq += "l";
         await mw.middleware()(mkctx(), next);
+        seq += "m";
         assertEquals(i, 1);
+        assertEquals(seq, "kiaeghfbcjlaeghfbcaeghfbdm");
+    });
+    it("should support plugins that have access to the conversation handle", async () => {
+        const mw = new Composer<TestContext>();
+        let i = 0;
+        let seq = "";
+        let kill = false;
+
+        type PluginContext = TestContext & {
+            phi: number;
+            prop: number;
+        };
+        mw.use(
+            conversations({
+                plugins: async (conversation) => {
+                    seq += "0";
+                    if (kill) await conversation.halt();
+                    return [async (ctx, next) => {
+                        seq += "a";
+                        Object.assign(ctx, { phi: 0.5 * (1 + Math.sqrt(5)) });
+                        await next();
+                        seq += "b";
+                    }];
+                },
+            }),
+            createConversation(async (convo, ctx: PluginContext) => {
+                seq += "c";
+                assertEquals(ctx.prop, 42);
+                ctx = await convo.wait();
+                seq += "d";
+                assertEquals(ctx.prop, 42);
+                assertEquals(Math.round(ctx.phi), 2);
+                i++;
+            }, {
+                id: "convo",
+                plugins: () => {
+                    seq += "1";
+                    return [async (ctx, next) => {
+                        seq += "e";
+                        Object.assign(ctx, { prop: 0 });
+                        await next();
+                        seq += "f";
+                    }, async (ctx, next) => {
+                        seq += "g";
+                        Object.assign(ctx, { prop: 42 });
+                        await next();
+                        seq += "h";
+                    }];
+                },
+            }),
+            async (ctx) => {
+                seq += "i";
+                await ctx.conversation.enter("convo");
+                seq += "j";
+            },
+        );
+        seq += "k";
+        await mw.middleware()(mkctx(), next);
+        seq += "l";
+        await mw.middleware()(mkctx(), next);
+        seq += "m";
+        kill = true;
+        await mw.middleware()(mkctx(), next);
+        seq += "n";
+        assertEquals(i, 1);
+        assertEquals(seq, "ki01aeghfbcjl01aeghfbc01aeghfbdmi0jn");
     });
     it("should halt the conversation upon default wait timeout", async () => {
         const onExit = spy(() => {});
@@ -859,6 +941,7 @@ describe("createConversation", () => {
 
             let i = 0;
             let p: Promise<unknown> | undefined;
+            const e = Promise.withResolvers<void>();
             mw.use(
                 conversations({
                     storage: {
@@ -868,14 +951,17 @@ describe("createConversation", () => {
                 }),
                 createConversation(async (c) => {
                     i++;
+                    e.resolve();
                     await c.wait();
                 }, "convo"),
                 (ctx) => {
+                    console.log("mw");
                     p = assertRejects(() => ctx.conversation.enter("convo"))
                         .then(() => i++);
                 },
             );
             await mw.middleware()(ctx, next);
+            await e.promise;
             assertEquals(i, 1);
             await p;
             assertEquals(i, 2);
