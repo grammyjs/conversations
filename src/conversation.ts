@@ -908,7 +908,17 @@ First return your data from `external` and then resume update handling using `wa
                 const ret = await this.escape((ctx) => task(ctx));
                 return { ok: true, ret: await beforeStore(ret) } as const;
             } catch (e) {
-                return { ok: false, err: await beforeStoreError(e) } as const;
+                try {
+                    return {
+                        ok: false,
+                        err: await beforeStoreError(e),
+                    } as const;
+                } catch (e) {
+                    return {
+                        ok: false,
+                        err: `Error in beforeStoreError, failed to serialize: ${e}`,
+                    } as const;
+                }
             } finally {
                 this.insideExternal = false;
             }
