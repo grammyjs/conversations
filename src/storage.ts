@@ -52,7 +52,7 @@ export interface PinnedVersion {
 }
 
 /**
- * Takes a version number and state management functions that are pinned to this
+ * Takes a version number and returns two state management functions that are pinned to this
  * version.
  *
  * The two functions it returns are `versionify` and `unpack`. The former can be
