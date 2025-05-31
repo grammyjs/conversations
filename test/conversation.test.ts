@@ -17,6 +17,7 @@ import {
     assertSpyCall,
     assertSpyCalls,
     assertStrictEquals,
+    assertStringIncludes,
     assertThrows,
     describe,
     it,
@@ -244,7 +245,7 @@ describe("Conversation", () => {
         assertEquals(ctx.update, { update_id: rnd });
         assertEquals(i, 1);
     });
-    it("should support throw an error when outside context objects are used in external after advancing from an event", async () => {
+    it("should throw an error when outside context objects are used in external after advancing from an event", async () => {
         const ctx = mkctx({ update_id: Math.random() });
         let i = 0;
         let rnd = 0;
@@ -306,6 +307,38 @@ describe("Conversation", () => {
         assertEquals(second.status, "complete");
         assert(second.status === "complete");
         assertEquals(i, 1);
+    });
+    it("should support external with error handling for bad error serialisation", async () => {
+        const ctx = mkctx();
+        let i = 0;
+        let j = 0;
+        async function convo(conversation: Convo) {
+            try {
+                await conversation.external({
+                    task: () => {
+                        throw new Error("trigger");
+                    },
+                    beforeStoreError: () => {
+                        throw new Error("meh");
+                    },
+                });
+                j++;
+            } catch (e) {
+                assert(typeof e === "string");
+                assertStringIncludes(e, "failed to serialize");
+            }
+            await conversation.wait();
+            i++;
+        }
+        const first = await enterConversation(convo, ctx);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const copy = structuredClone(first);
+        const second = await resumeConversation(convo, ctx, copy);
+        assertEquals(second.status, "complete");
+        assert(second.status === "complete");
+        assertEquals(i, 1);
+        assertEquals(j, 0);
     });
     it("should support external with custom error formats", async () => {
         const ctx = mkctx();
