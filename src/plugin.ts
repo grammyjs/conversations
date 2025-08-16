@@ -499,6 +499,11 @@ export function conversations<OC extends Context, C extends Context>(
         }
 
         const index: ConversationIndex<OC, C> = new Map();
+        const exit = options.onExit !== undefined
+            ? async (name: string) => {
+                await options.onExit?.(name, ctx);
+            }
+            : undefined;
         async function enter(id: string, ...args: unknown[]) {
             const entry = index.get(id);
             if (entry === undefined) {
@@ -516,18 +521,17 @@ export function conversations<OC extends Context, C extends Context>(
                 api: ctx.api,
                 me: ctx.me,
             };
+            const onHalt = async () => {
+                await exit?.(id);
+            };
             return await enterConversation(builder, base, {
                 args,
                 ctx,
                 plugins,
+                onHalt,
                 maxMillisecondsToWait,
             });
         }
-        const exit = options.onExit !== undefined
-            ? async (name: string) => {
-                await options.onExit?.(name, ctx);
-            }
-            : undefined;
         function isParallel(name: string) {
             return index.get(name)?.parallel ?? true;
         }
