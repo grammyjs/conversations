@@ -363,6 +363,55 @@ describe("createConversation", () => {
         assertSpyCalls(onExit, 1);
         assertSpyCallArg(onExit, 0, 0, "convo");
     });
+    it("should call onExit upon halt without wait", async () => {
+        const onExit = spy(() => {});
+        const mw = new Composer<TestContext>();
+        let i = 0;
+        let j = 0;
+        mw.use(
+            conversations({ onExit }),
+            createConversation(async (convo) => {
+                i++;
+                await convo.halt();
+                j++;
+            }, { id: "convo" }),
+            async (ctx) => {
+                await ctx.conversation.enter("convo");
+            },
+        );
+        const up = { message: { chat: { id: 0 } } };
+        await mw.middleware()(mkctx(up), next);
+        await mw.middleware()(mkctx(up), next);
+        assertEquals(i, 2);
+        assertEquals(j, 0);
+        assertSpyCalls(onExit, 2); // enter, halt, enter, halt
+        assertSpyCallArg(onExit, 0, 0, "convo");
+    });
+    it("should call onExit upon halt after wait", async () => {
+        const onExit = spy(() => {});
+        const mw = new Composer<TestContext>();
+        let i = 0;
+        let j = 0;
+        mw.use(
+            conversations({ onExit }),
+            createConversation(async (convo) => {
+                i++;
+                await convo.wait();
+                await convo.halt();
+                j++;
+            }, { id: "convo" }),
+            async (ctx) => {
+                await ctx.conversation.enter("convo");
+            },
+        );
+        const up = { message: { chat: { id: 0 } } };
+        await mw.middleware()(mkctx(up), next);
+        await mw.middleware()(mkctx(up), next);
+        assertEquals(i, 2);
+        assertEquals(j, 0);
+        assertSpyCalls(onExit, 1); // enter, wait, resume, halt
+        assertSpyCallArg(onExit, 0, 0, "convo");
+    });
     it("should continue if default wait timeouts do not kick in", async () => {
         const onExit = spy(() => {});
         const mw = new Composer<TestContext>();
