@@ -938,28 +938,28 @@ First return your data from `external` and then resume update handling using `wa
      * every replay. Prefer this over calling `Date.now()` directly.
      */
     async now() {
-        return await this.external(() => Date.now());
+        return await this.controls.action(() => Date.now(), "now");
     }
     /**
      * Takes `Math.random()` once when reached, and returns the same value
      * during every replay. Prefer this over calling `Math.random()` directly.
      */
     async random() {
-        return await this.external(() => Math.random());
+        return await this.controls.action(() => Math.random(), "random");
     }
     /**
      * Calls `console.log` only the first time it is reached, but not during
      * subsequent replays. Prefer this over calling `console.log` directly.
      */
     async log(...data: unknown[]) {
-        await this.external(() => console.log(...data));
+        await this.controls.action(() => console.log(...data), "log");
     }
     /**
      * Calls `console.error` only the first time it is reached, but not during
      * subsequent replays. Prefer this over calling `console.error` directly.
      */
     async error(...data: unknown[]) {
-        await this.external(() => console.error(...data));
+        await this.controls.action(() => console.error(...data), "error");
     }
 
     /**
