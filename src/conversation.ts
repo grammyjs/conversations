@@ -938,7 +938,7 @@ First return your data from `external` and then resume update handling using `wa
      * every replay. Prefer this over calling `Date.now()` directly.
      */
     async now() {
-        const now = await this.controls.action(() => Date.now(), "now");
+        const now = await this.controls.action(() => Date.now(), "external");
         if (typeof now === "number") return now;
         // backwards compatibility with previous implementation via `external`
         return (now as { ret: number }).ret;
@@ -948,7 +948,10 @@ First return your data from `external` and then resume update handling using `wa
      * during every replay. Prefer this over calling `Math.random()` directly.
      */
     async random() {
-        const rand = await this.controls.action(() => Math.random(), "random");
+        const rand = await this.controls.action(
+            () => Math.random(),
+            "external",
+        );
         if (typeof rand === "number") return rand;
         // backwards compatibility with previous implementation via `external`
         return (rand as { ret: number }).ret;
@@ -958,14 +961,14 @@ First return your data from `external` and then resume update handling using `wa
      * subsequent replays. Prefer this over calling `console.log` directly.
      */
     async log(...data: unknown[]) {
-        await this.controls.action(() => console.log(...data), "log");
+        await this.controls.action(() => console.log(...data), "external");
     }
     /**
      * Calls `console.error` only the first time it is reached, but not during
      * subsequent replays. Prefer this over calling `console.error` directly.
      */
     async error(...data: unknown[]) {
-        await this.controls.action(() => console.error(...data), "error");
+        await this.controls.action(() => console.error(...data), "external");
     }
 
     /**
