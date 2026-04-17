@@ -253,7 +253,10 @@ export class Conversation<
         if (this.insideExternal) {
             throw new Error(
                 "Cannot wait for updates from inside `external`, or concurrently to it! \
-First return your data from `external` and then resume update handling using `wait` calls.",
+This also applies to Bot API calls (such as `ctx.api.getFile`, `ctx.reply`, \
+or chat actions) because they rely on `wait` internally, so perform \
+them outside of `external` instead. First return your data from `external` and \
+then resume update handling using `wait` calls.",
             );
         }
         const makeWait = async () => {
