@@ -380,23 +380,21 @@ describe("Conversation", () => {
         const methods: string[] = [];
         const payloads: unknown[] = [];
         const pattern = new URLPattern({ pathname: "/botdummy/:method" });
-        using _ = stub(
-            globalThis,
-            "fetch",
-            (url, opts) => {
-                if (typeof url !== "string") throw new Error("bad url");
-                const method = pattern.exec(url)?.pathname.groups.method;
-                if (method === undefined) throw new Error("bad method");
-                const body = opts?.body;
-                if (typeof body !== "string") throw new Error("bad body");
-                const payload = JSON.parse(body);
-                methods.push(method);
-                payloads.push(payload);
-                return Promise.resolve(
-                    new Response(JSON.stringify({ ok: true, result: i++ })),
-                );
-            },
-        );
+        using _ = stub(globalThis, "fetch", (url, opts) => {
+            if (typeof url !== "string") throw new Error("bad url");
+            const method = pattern.exec(url)?.pathname.groups.method;
+            if (method === undefined) throw new Error("bad method");
+            const body = opts !== undefined && "body" in opts
+                ? opts.body
+                : undefined;
+            if (typeof body !== "string") throw new Error("bad body");
+            const payload = JSON.parse(body);
+            methods.push(method);
+            payloads.push(payload);
+            return Promise.resolve(
+                new Response(JSON.stringify({ ok: true, result: i++ })),
+            );
+        });
 
         async function convo(conversation: Convo, ctx: Context) { // first
             const p = conversation.wait(); // second
@@ -515,27 +513,25 @@ describe("Conversation", () => {
         const methods: string[] = [];
         const payloads: unknown[] = [];
         const pattern = new URLPattern({ pathname: "/botdummy/:method" });
-        using _ = stub(
-            globalThis,
-            "fetch",
-            (url, opts) => {
-                if (typeof url !== "string") throw new Error("bad url");
-                const method = pattern.exec(url)?.pathname.groups.method;
-                if (method === undefined) throw new Error("bad method");
-                const body = opts?.body;
-                if (typeof body !== "string") throw new Error("bad body");
-                const payload = JSON.parse(body);
-                methods.push(method);
-                payloads.push(payload);
-                return new Promise((resolve) => {
-                    // Respond on next macro task
-                    setTimeout(() => {
-                        const json = JSON.stringify({ ok: true, result: i++ });
-                        resolve(new Response(json));
-                    }, 0);
-                });
-            },
-        );
+        using _ = stub(globalThis, "fetch", (url, opts) => {
+            if (typeof url !== "string") throw new Error("bad url");
+            const method = pattern.exec(url)?.pathname.groups.method;
+            if (method === undefined) throw new Error("bad method");
+            const body = opts !== undefined && "body" in opts
+                ? opts.body
+                : undefined;
+            if (typeof body !== "string") throw new Error("bad body");
+            const payload = JSON.parse(body);
+            methods.push(method);
+            payloads.push(payload);
+            return new Promise((resolve) => {
+                // Respond on next macro task
+                setTimeout(() => {
+                    const json = JSON.stringify({ ok: true, result: i++ });
+                    resolve(new Response(json));
+                }, 0);
+            });
+        });
 
         async function convo(conversation: Convo, ctx: Context) { // first, second
             if ("no" in ctx.update) {
