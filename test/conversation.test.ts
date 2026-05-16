@@ -340,6 +340,24 @@ describe("Conversation", () => {
         assertEquals(i, 1);
         assertEquals(j, 0);
     });
+    it("should throw a helpful error when `external` returns a non-cloneable value", async () => {
+        const ctx = mkctx();
+        let caught: unknown;
+        async function convo(conversation: Convo) {
+            try {
+                await conversation.external(() => () => 0);
+            } catch (e) {
+                caught = e;
+            }
+            await conversation.wait();
+        }
+        const first = await enterConversation(convo, ctx);
+        assertEquals(first.status, "handled");
+        assertInstanceOf(caught, Error);
+        assertStringIncludes(caught.message, "could not be cloned");
+        assertStringIncludes(caught.message, "beforeStore");
+        assert(caught.cause instanceof Error);
+    });
     it("should support external with custom error formats", async () => {
         const ctx = mkctx();
         let i = 0;

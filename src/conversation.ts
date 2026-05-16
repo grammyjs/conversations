@@ -926,7 +926,18 @@ First return your data from `external` and then resume update handling using `wa
         // Recover values after loading them
         const ret = await this.controls.action(action, "external");
         // Clone them to provide immutability
-        const cloned = structuredClone(ret);
+        let cloned: typeof ret;
+        try {
+            cloned = structuredClone(ret);
+        } catch (err) {
+            throw new Error(
+                "The value returned from `external` could not be cloned \
+for replay. Return a value that `structuredClone` can handle, or pass \
+`beforeStore` and `afterLoad` to serialize it yourself.",
+                // @ts-ignore not available on old Node versions
+                { cause: err },
+            );
+        }
         if (cloned.ok) {
             return await afterLoad(cloned.ret);
         } else {
