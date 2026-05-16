@@ -934,6 +934,7 @@ First return your data from `external` and then resume update handling using `wa
                 "The value returned from `external` could not be cloned \
 for replay. Return a value that `structuredClone` can handle, or pass \
 `beforeStore` and `afterLoad` to serialize it yourself.",
+                // @ts-ignore not available on old Node versions
                 { cause: err },
             );
         }
