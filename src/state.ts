@@ -211,7 +211,11 @@ export function cursor(state: ReplayState): ReplayCursor {
             // replay existing data (do nothing)
             const expected = state.send[send].payload;
             if (expected !== payload) {
-                throw new Error(`Bad replay, expected op '${expected}'`);
+                throw new Error(
+                    `Bad replay, expected op '${expected}' but got '${payload}'. \
+This usually means a Bot API call (e.g. ctx.api.*, ctx.reply) was made inside \
+\`conversation.external()\` or the conversation was otherwise used incorrectly.`,
+                );
             }
         } else { // send === state.send.length
             // log new data

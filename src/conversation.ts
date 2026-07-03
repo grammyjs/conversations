@@ -253,6 +253,7 @@ export class Conversation<
         if (this.insideExternal) {
             throw new Error(
                 "Cannot wait for updates from inside `external`, or concurrently to it! \
+Bot API calls (e.g. ctx.api.*, ctx.reply) must not be made inside `external`. \
 First return your data from `external` and then resume update handling using `wait` calls.",
             );
         }
