@@ -22,6 +22,10 @@ const internalRecursionDetection = Symbol("conversations.recursion");
 const internalState = Symbol("conversations.state");
 const internalCompletenessMarker = Symbol("conversations.completeness");
 
+function cloneUpdate(update: Update): Update {
+    return JSON.parse(JSON.stringify(update)) as Update;
+}
+
 interface InternalState<OC extends Context, C extends Context> {
     getMutableData(): ConversationData;
     index: ConversationIndex<OC, C>;
@@ -517,7 +521,7 @@ export function conversations<OC extends Context, C extends Context>(
             const { builder, plugins, maxMillisecondsToWait } = entry;
             await options.onEnter?.(id, ctx);
             const base: ContextBaseData = {
-                update: ctx.update,
+                update: cloneUpdate(ctx.update),
                 api: ctx.api,
                 me: ctx.me,
             };
@@ -892,7 +896,7 @@ export function createConversation<OC extends Context, C extends Context>(
 
         const mutableData = getMutableData();
         const base: ContextBaseData = {
-            update: ctx.update,
+            update: cloneUpdate(ctx.update),
             api: ctx.api,
             me: ctx.me,
         };
@@ -951,9 +955,18 @@ export async function runParallelConversations<
     if (!(id in data)) return { status: "skipped", next: true };
     const states = data[id];
     const len = states.length;
+    const update = len > 1 ? cloneUpdate(base.update) : base.update;
     for (let i = 0; i < len; i++) {
         const state = states[i];
-        const result = await resumeConversation(builder, base, state, options);
+        const currentBase = i === 0
+            ? base
+            : { ...base, update: cloneUpdate(update) };
+        const result = await resumeConversation(
+            builder,
+            currentBase,
+            state,
+            options,
+        );
         switch (result.status) {
             case "skipped":
                 if (result.next) continue;
@@ -1120,6 +1133,7 @@ export async function resumeConversation<OC extends Context, C extends Context>(
     options?: ResumeOptions<OC, C>,
 ): Promise<ConversationResult> {
     const { update, api, me } = base;
+    const replayUpdate = cloneUpdate(update);
     const args = state.args === undefined ? [] : JSON.parse(state.args);
     const {
         ctx = youTouchYouDie<OC>(
@@ -1152,7 +1166,12 @@ export async function resumeConversation<OC extends Context, C extends Context>(
     let next = true;
     INTERRUPTS: for (let i = 0; i < len; i++) {
         const int = ints[i];
-        const checkpoint = ReplayEngine.supply(replayState, int, update);
+        const checkpoint = ReplayEngine.supply(
+            replayState,
+            int,
+            replayUpdate,
+            i === 0 ? update : cloneUpdate(replayUpdate),
+        );
         let rewind: boolean;
         do {
             rewind = false;

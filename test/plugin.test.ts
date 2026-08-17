@@ -1433,6 +1433,29 @@ describe("createConversation", () => {
             assertEquals([p, q, r, s], expected);
         }
     });
+    it("should isolate skipped conversations from downstream middleware", async () => {
+        const mw = new Composer<TestContext>();
+        let downstreamUpdate: Update | undefined;
+        mw.use(
+            conversations(),
+            createConversation(async (conversation) => {
+                const ctx = await conversation.wait();
+                // @ts-expect-error mock
+                ctx.update.tainted = true;
+                await conversation.skip({ next: true });
+            }, "convo"),
+            async (ctx) => {
+                if ("enter" in ctx.update) {
+                    await ctx.conversation.enter("convo");
+                } else {
+                    downstreamUpdate = ctx.update;
+                }
+            },
+        );
+        await mw.middleware()(mkctx({ enter: true }), next);
+        await mw.middleware()(mkctx(), next);
+        assertEquals("tainted" in (downstreamUpdate as Update), false);
+    });
     it("should support handling errors after resuming", async () => {
         const mw = new Composer<TestContext>();
         const plugin = conversations();

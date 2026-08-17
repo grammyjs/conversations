@@ -40,6 +40,30 @@ describe("ReplayEngine", () => {
         assert(result.type === "returned");
         assertSpyCalls(builder, 3);
     });
+    it("should retain supplied values across persistence", async () => {
+        const values: string[] = [];
+        const engine = new ReplayEngine(async (c: ReplayControls) => {
+            const first = await c.interrupt("a") as { value: string };
+            values.push(first.value);
+            const second = await c.interrupt("b") as { value: string };
+            values.push(second.value);
+        });
+        let result = await engine.play();
+        assert(result.type === "interrupted");
+        ReplayEngine.supply(
+            result.state,
+            result.interrupts[0],
+            { value: "stored" },
+            { value: "fresh" },
+        );
+        result = await engine.replay(result.state);
+        assert(result.type === "interrupted");
+        const state = JSON.parse(JSON.stringify(result.state));
+        ReplayEngine.supply(state, result.interrupts[0], { value: "next" });
+        result = await engine.replay(state);
+        assertEquals(result.type, "returned");
+        assertEquals(values, ["fresh", "stored", "next"]);
+    });
     it("should support actions", async () => {
         let i = 0;
         const action = spy(() => i++);
