@@ -15,6 +15,7 @@ import {
     type User,
 } from "./deps.deno.ts";
 import { type Checkpoint, type ReplayControls } from "./engine.ts";
+import { cloneUpdate } from "./clone.ts";
 import { ConversationForm } from "./form.ts";
 import { type ConversationMenuOptions, ConversationMenuPool } from "./menu.ts";
 
@@ -25,9 +26,6 @@ type InternalReplayControls = ReplayControls & {
         replayed: boolean;
     }>;
 };
-function cloneUpdate(update: Update): Update {
-    return JSON.parse(JSON.stringify(update)) as Update;
-}
 /** Alias for `string` but with auto-complete for common commands */
 export type StringWithCommandSuggestions =
     | (string & Record<never, never>)

@@ -15,16 +15,13 @@ import {
     ReplayEngine,
     type ReplayState,
 } from "./engine.ts";
+import { cloneUpdate } from "./clone.ts";
 import { youTouchYouDie } from "./nope.ts";
 import { type ConversationStorage, uniformStorage } from "./storage.ts";
 
 const internalRecursionDetection = Symbol("conversations.recursion");
 const internalState = Symbol("conversations.state");
 const internalCompletenessMarker = Symbol("conversations.completeness");
-
-function cloneUpdate(update: Update): Update {
-    return JSON.parse(JSON.stringify(update)) as Update;
-}
 
 interface InternalState<OC extends Context, C extends Context> {
     getMutableData(): ConversationData;
