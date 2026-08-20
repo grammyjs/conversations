@@ -221,6 +221,33 @@ describe("Conversation", () => {
         assertSpyCall(observe, 1, { args: [1] });
         assertSpyCall(observe, 2, { args: [1] });
     });
+    it("should return immutable updates from wait", async () => {
+        const ctx = mkctx({ counter: 0 });
+        const observe = spy((_counter: number) => {});
+        async function convo(conversation: Convo) {
+            const waited = await conversation.wait();
+            const update = waited.update as unknown as { counter: number };
+            update.counter++;
+            const checkpoint = conversation.checkpoint();
+            observe(update.counter);
+            await conversation.wait();
+            update.counter++;
+            await conversation.rewind(checkpoint);
+        }
+        const first = await enterConversation(convo, ctx);
+        assertEquals(first.status, "handled");
+        assert(first.status === "handled");
+        const second = await resumeConversation(convo, ctx, first);
+        assertEquals(second.status, "handled");
+        assert(second.status === "handled");
+        const third = await resumeConversation(convo, ctx, second);
+        assertEquals(third.status, "handled");
+        assert(third.status === "handled");
+        assertSpyCalls(observe, 3);
+        assertSpyCall(observe, 0, { args: [1] });
+        assertSpyCall(observe, 1, { args: [1] });
+        assertSpyCall(observe, 2, { args: [1] });
+    });
     it("should support outside context objects in external", async () => {
         const ctx = mkctx({ update_id: Math.random() });
         let i = 0;
@@ -629,10 +656,13 @@ describe("Conversation", () => {
             const one = conversation.wait();
             const p0 = zero.then(async ({ update }) => {
                 if (update.message?.text !== "zero") {
+                    // @ts-expect-error mock
+                    update.tainted = true;
                     await conversation.skip();
                 }
             });
             const p1 = one.then(async ({ update }) => {
+                assertFalse("tainted" in update);
                 if (update.message?.text !== "one") {
                     await conversation.skip();
                 }

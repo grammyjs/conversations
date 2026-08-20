@@ -75,6 +75,15 @@ export interface ReplayControls {
 }
 /** A function to be replayed by a {@link ReplayEngine} */
 export type Builder = (controls: ReplayControls) => void | Promise<void>;
+interface InterruptResult {
+    value: unknown;
+    replayed: boolean;
+}
+interface FreshInterrupt {
+    interrupt: number;
+    value: unknown;
+}
+const freshInterrupts = new WeakMap<ReplayState, FreshInterrupt>();
 /** The result of a replay performed by a {@link ReplayEngine} */
 export type ReplayResult = Returned | Thrown | Interrupted | Canceled;
 /**
@@ -189,7 +198,9 @@ export class ReplayEngine {
      * @param state A previously created replay state
      */
     async replay(state: ReplayState) {
-        return await replayState(this.builder, state);
+        const fresh = freshInterrupts.get(state);
+        freshInterrupts.delete(state);
+        return await replayState(this.builder, state, fresh);
     }
 
     /**
@@ -223,12 +234,19 @@ export class ReplayEngine {
      * @param state A replay state to mutate
      * @param interrupt An interrupt to resolve
      * @param value The value to supply
+     * @param freshValue Value for the first in-memory replay
      */
-    static supply(state: ReplayState, interrupt: number, value: unknown) {
+    static supply(
+        state: ReplayState,
+        interrupt: number,
+        value: unknown,
+        freshValue = value,
+    ) {
         const get = inspect(state);
         const checkpoint = get.checkpoint();
         const mut = mutate(state);
         mut.done(interrupt, value);
+        freshInterrupts.set(state, { interrupt, value: freshValue });
         return checkpoint;
     }
     /**
@@ -247,6 +265,7 @@ export class ReplayEngine {
 async function replayState(
     builder: Builder,
     state: ReplayState,
+    fresh?: FreshInterrupt,
 ): Promise<ReplayResult> {
     const cur = cursor(state);
 
@@ -300,20 +319,26 @@ async function replayState(
     let returnValue: unknown = undefined;
 
     // Define replay controls
-    async function interrupt(key: string) {
+    async function interruptWithMeta(key: string): Promise<InterruptResult> {
         if (returned || (interrupted && interrupts.length === 0)) {
             // Already returned or canceled, so we must no longer perform an interrupt.
             await boom();
         }
         begin();
-        const res = await cur.perform(async (op) => {
+        const op = cur.op(key);
+        const res = await cur.done(op, async () => {
             interrupted = true;
             interrupts.push(op);
             updateBoundary();
             await boom();
-        }, key);
+        });
         end();
-        return res;
+        return fresh?.interrupt === op
+            ? { value: fresh.value, replayed: false }
+            : { value: res, replayed: true };
+    }
+    async function interrupt(key: string) {
+        return (await interruptWithMeta(key)).value;
     }
     async function cancel(key?: unknown) {
         if (complete) {
@@ -342,7 +367,13 @@ async function replayState(
     function checkpoint() {
         return cur.checkpoint();
     }
-    const controls: ReplayControls = { interrupt, cancel, action, checkpoint };
+    const controls = {
+        interrupt,
+        interruptWithMeta,
+        cancel,
+        action,
+        checkpoint,
+    };
 
     // Perform replay
     async function run() {

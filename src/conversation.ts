@@ -15,10 +15,17 @@ import {
     type User,
 } from "./deps.deno.ts";
 import { type Checkpoint, type ReplayControls } from "./engine.ts";
+import { cloneUpdate } from "./clone.ts";
 import { ConversationForm } from "./form.ts";
 import { type ConversationMenuOptions, ConversationMenuPool } from "./menu.ts";
 
 type MaybeArray<T> = T | T[];
+type InternalReplayControls = ReplayControls & {
+    interruptWithMeta(key: string): Promise<{
+        value: unknown;
+        replayed: boolean;
+    }>;
+};
 /** Alias for `string` but with auto-complete for common commands */
 export type StringWithCommandSuggestions =
     | (string & Record<never, never>)
@@ -263,7 +270,11 @@ First return your data from `external` and then resume update handling using `wa
                 : this.options.maxMillisecondsToWait;
             const key = options.collationKey ?? "wait";
             const before = limit !== undefined && await this.now();
-            const update = await this.controls.interrupt(key) as Update;
+            const controls = this.controls as Partial<InternalReplayControls>;
+            const { value, replayed } = controls.interruptWithMeta === undefined
+                ? { value: await this.controls.interrupt(key), replayed: false }
+                : await controls.interruptWithMeta(key);
+            const update = value as Update;
             if (before !== false) {
                 const after = await this.now();
                 if (after - before >= limit) {
@@ -272,7 +283,9 @@ First return your data from `external` and then resume update handling using `wa
             }
 
             // convert to context object
-            const ctx = this.hydrate(update);
+            const ctx = this.hydrate(
+                replayed ? cloneUpdate(update) : update,
+            );
             // prepare context for menus
             const { handleClicks } = this.menuPool.install(ctx);
 
